@@ -60,7 +60,7 @@ impl Page {
         contexts: &Object,
         parser: &Parser,
     ) -> Result<bool, Box<dyn Error + Send + Sync>> {
-        let permalink_changed = self.render_url(&contexts, &parser)?;
+        let permalink_changed = self.render_url(contexts, parser)?;
         let rendered_content = parser.parse(&self.content)?.render(contexts)?;
         if !permalink_changed && rendered_content == self.rendered {
             return Ok(false);

@@ -1,7 +1,7 @@
 use crate::page::Page;
-use daggy::{petgraph::Direction, stable_dag::StableDag, Dag, NodeIndex, Walker};
+use daggy::{petgraph::Direction, stable_dag::StableDag, NodeIndex, Walker};
 use liquid::{to_object, Object, Parser};
-use std::{error::Error, path::PathBuf};
+use std::error::Error;
 
 /// Information held in memory while performing a build.
 pub struct Build {
