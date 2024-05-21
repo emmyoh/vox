@@ -41,3 +41,17 @@ pub struct DateNotFound {
     /// The page missing its date.
     pub src: NamedSource<String>,
 }
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("Invalid list of dependent collections.")]
+#[diagnostic(
+    code(page::invalid_collections_property),
+    url(docsrs),
+    help("Please ensure that your `collections` property is a list of collections this page depends on.")
+)]
+/// Invalid list of dependent collections.
+pub struct InvalidCollectionsProperty {
+    #[source_code]
+    /// The page with the invalid `collections` property.
+    pub src: NamedSource<String>,
+}

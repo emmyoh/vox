@@ -20,3 +20,6 @@ pub mod page;
 
 /// Errors originating during the build process.
 pub mod error;
+
+/// Template parsing and rendering.
+pub mod templates;

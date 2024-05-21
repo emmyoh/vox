@@ -1,5 +1,5 @@
 use crate::page::Page;
-use daggy::{petgraph::Direction, Dag, NodeIndex, Walker};
+use daggy::{petgraph::Direction, stable_dag::StableDag, Dag, NodeIndex, Walker};
 use liquid::{to_object, Object, Parser};
 use std::{error::Error, path::PathBuf};
 
@@ -12,7 +12,7 @@ pub struct Build {
     /// The locale information of the build, primarily used to render dates and times.
     pub locale: String,
     /// A directed acyclic graph (DAG) populated with pages and their children.
-    pub dag: Dag<Page, PathBuf>,
+    pub dag: StableDag<Page, ()>,
 }
 
 impl Build {
@@ -21,7 +21,7 @@ impl Build {
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_all(&mut self) -> Result<Vec<NodeIndex>, Box<dyn Error>> {
+    pub fn render_all(&mut self) -> Result<Vec<NodeIndex>, Box<dyn Error + Send + Sync>> {
         let mut rendered_indices = Vec::new();
         let root_indices = self.find_root_indices();
         for root_index in root_indices {
@@ -48,7 +48,7 @@ impl Build {
         &mut self,
         root_index: NodeIndex,
         contexts: Object,
-    ) -> Result<Vec<NodeIndex>, Box<dyn Error>> {
+    ) -> Result<Vec<NodeIndex>, Box<dyn Error + Send + Sync>> {
         let mut rendered_indices = Vec::new();
         let root_object = {
             let root_page = self.dag.node_weight_mut(root_index).unwrap();

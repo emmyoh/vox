@@ -1,7 +1,7 @@
 [package]
 name = "vox"
 authors = ["Emil Sayahi <sayahie@miamioh.edu>"]
-description = "A static site generator."
+description = "A performant static site generator built to scale."
 repository = "https://github.com/emmyoh/vox/"
 license = "AGPL-3.0-or-later"
 readme = "README.md"
@@ -23,6 +23,7 @@ required-features = ["cli"]
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde", "unstable-locales"] }
+clap = { version = "4.5.4", features = ["derive"], optional = true }
 comrak = { version = "0.22.0", features = ["syntect", "shortcodes"], default-features = false }
 daggy = { version = "0.8.0", features = ["stable_dag"] }
 toml = "0.8.12"
@@ -37,9 +38,13 @@ mimalloc = { version = "0.1.41", optional = true }
 ticky = { version = "1.0.2", optional = true }
 miette = { version = "7.2.0", features = ["fancy", "syntect-highlighter"] }
 thiserror = "1.0.59"
-glob = { version = "0.3.1", optional = true }
-tokio = { version = "1.37.0", features = ["full"] }
+glob = { version = "0.3.1" }
+tokio = { version = "1.37.0", features = ["full"], optional = true }
+futures = "0.3.30"
+tracing-subscriber = { version = "0.3.18", optional = true }
+tracing = "0.1.40"
+notify-debouncer-full = { version = "0.3.1", default-features = false, optional = true }
 
 [features]
 default = []
-cli = ["dep:mimalloc", "dep:ticky", "dep:glob"]
+cli = ["dep:mimalloc", "dep:ticky", "dep:tokio", "dep:clap", "dep:tracing-subscriber", "dep:notify-debouncer-full"]

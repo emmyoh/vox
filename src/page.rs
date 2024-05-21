@@ -1,6 +1,6 @@
 use crate::{
     date::{locale_string_to_locale, Date},
-    error::{DateNotFound, FrontmatterNotFound},
+    error::{DateNotFound, FrontmatterNotFound, InvalidCollectionsProperty},
 };
 use liquid::{Object, Parser};
 use miette::NamedSource;
@@ -23,7 +23,10 @@ pub struct Page {
     pub date: Date,
     /// The collections a page depends on.
     /// This is defined in a page's frontmatter.
-    pub collections: Vec<String>,
+    pub collections: Option<Vec<String>>,
+    /// The layout a page uses.
+    /// This is defined in a page's frontmatter.
+    pub layout: Option<String>,
     /// Path to the page, not including the page itself.
     pub directory: String,
     /// The page's base filename.
@@ -52,7 +55,11 @@ impl Page {
     /// # Returns
     ///
     /// Whether or not the page changed when rendering.
-    pub fn render(&mut self, contexts: &Object, parser: &Parser) -> Result<bool, Box<dyn Error>> {
+    pub fn render(
+        &mut self,
+        contexts: &Object,
+        parser: &Parser,
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
         let permalink_changed = self.render_url(&contexts, &parser)?;
         let rendered_content = parser.parse(&self.content)?.render(contexts)?;
         if !permalink_changed && rendered_content == self.rendered {
@@ -77,7 +84,7 @@ impl Page {
         &mut self,
         contexts: &Object,
         parser: &Parser,
-    ) -> Result<bool, Box<dyn Error>> {
+    ) -> Result<bool, Box<dyn Error + Send + Sync>> {
         let expanded_permalink = match self.permalink.as_str() {
             "date" => {
                 "/{{ page.data.collection }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}.html".to_owned()
@@ -121,7 +128,7 @@ impl Page {
     pub fn get_frontmatter_and_body(
         contents: String,
         path: PathBuf,
-    ) -> Result<(String, String), Box<dyn Error>> {
+    ) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
         let contents_clone = contents.clone();
         let mut lines = contents_clone.lines();
         let start_of_frontmatter = lines.position(|x| x == "---").ok_or(FrontmatterNotFound {
@@ -152,7 +159,11 @@ impl Page {
     /// # Returns
     ///
     /// An instance of a page.
-    pub fn new(contents: String, path: PathBuf, locale: String) -> Result<Page, Box<dyn Error>> {
+    pub fn new(
+        contents: String,
+        path: PathBuf,
+        locale: String,
+    ) -> Result<Page, Box<dyn Error + Send + Sync>> {
         let path = fs::canonicalize(path)?;
         let (frontmatter, body) = Self::get_frontmatter_and_body(contents.clone(), path.clone())?;
         let frontmatter_data = frontmatter.parse::<Table>()?;
@@ -164,22 +175,36 @@ impl Page {
             })?
             .as_datetime()
             .ok_or(DateNotFound {
-                src: NamedSource::new(path.to_string_lossy(), frontmatter),
+                src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
             })?;
         let locale = locale_string_to_locale(locale);
-        let collections = frontmatter_data_clone
-            .get("collections")
-            .unwrap_or(&toml::Value::Array(toml::value::Array::new()))
-            .as_array()
-            .unwrap_or(&Vec::new())
-            .iter()
-            .map(|x| x.as_str().unwrap_or("").to_string())
-            .collect();
+        let layout = frontmatter_data_clone.get("layout").map(|p| p.to_string());
+        let collections = match frontmatter_data_clone.get("collections") {
+            Some(collections) => Some(
+                collections
+                    .as_array()
+                    .ok_or(InvalidCollectionsProperty {
+                        src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
+                    })?
+                    .iter()
+                    .map(|x| {
+                        x.as_str()
+                            .ok_or(InvalidCollectionsProperty {
+                                src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
+                            })
+                            .unwrap()
+                            .to_string()
+                    })
+                    .collect(),
+            ),
+            None => None,
+        };
         Ok(Page {
             data: frontmatter_data,
             content: body,
             permalink: String::new(),
             date: Date::value_to_date(*date_value, locale),
+            layout,
             collections,
             directory: path
                 .parent()
