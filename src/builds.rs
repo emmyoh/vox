@@ -1,7 +1,8 @@
 use crate::page::Page;
+use ahash::AHashMap;
 use daggy::{petgraph::Direction, stable_dag::StableDag, NodeIndex, Walker};
 use liquid::{to_object, Object, Parser};
-use std::error::Error;
+use std::{env, error::Error, fs, path::PathBuf};
 
 /// Information held in memory while performing a build.
 pub struct Build {
@@ -50,16 +51,62 @@ impl Build {
         contexts: Object,
     ) -> Result<Vec<NodeIndex>, Box<dyn Error + Send + Sync>> {
         let mut rendered_indices = Vec::new();
-        let root_object = {
-            let root_page = self.dag.node_weight_mut(root_index).unwrap();
-            if root_page.render(&contexts, &self.template_parser)? {
-                rendered_indices.push(root_index);
-            }
-            liquid_core::Value::Object(to_object(&root_page)?)
-        };
+
         while let Some(child) = self.dag.children(root_index).walk_next(&self.dag) {
             let mut child_contexts = self.contexts.clone();
-            child_contexts.insert("layout".into(), root_object.clone());
+            let mut parent_pages: AHashMap<NodeIndex, Page> = AHashMap::new();
+            let mut collection_pages: AHashMap<String, Vec<NodeIndex>> = AHashMap::new();
+            // Find all parent pages of the child page.
+            while let Some(parent) = self.dag.parents(child.1).walk_next(&self.dag) {
+                let parent_page = &self.dag.graph()[parent.1];
+                parent_pages.insert(parent.1, parent_page.clone());
+            }
+            for (parent_index, parent_page) in parent_pages.iter_mut() {
+                let parent_path = fs::canonicalize(PathBuf::from(parent_page.directory.clone()))?;
+                let path_difference =
+                    parent_path.strip_prefix(fs::canonicalize(env::current_dir()?)?)?;
+                // If the parent page is a layout page, render it and add it to the child's contexts.
+                if path_difference.starts_with(PathBuf::from("layout")) {
+                    let layout_object = {
+                        let layout_page = self.dag.node_weight_mut(*parent_index).unwrap();
+                        if layout_page.render(&contexts, &self.template_parser)? {
+                            rendered_indices.push(*parent_index);
+                        }
+                        liquid_core::Value::Object(to_object(&parent_page)?)
+                    };
+                    child_contexts.insert("layout".into(), layout_object.clone());
+                } else {
+                    // If the parent page is a collection page, make note of it.
+                    let path_components: Vec<String> = path_difference
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().to_string())
+                        .collect();
+                    let collection_name = path_components[0].clone();
+                    if collection_pages.contains_key(&collection_name) {
+                        collection_pages
+                            .get_mut(&collection_name)
+                            .unwrap()
+                            .push(*parent_index);
+                    } else {
+                        collection_pages.insert(collection_name.clone(), vec![*parent_index]);
+                    }
+                }
+            }
+            // Render all collection pages and add them to the child's contexts.
+            for (collection_name, collection) in collection_pages.iter_mut() {
+                let collection_object = {
+                    let mut collection_pages = Vec::new();
+                    for page_index in collection.iter() {
+                        let collection_page = self.dag.node_weight_mut(*page_index).unwrap();
+                        if collection_page.render(&contexts, &self.template_parser)? {
+                            rendered_indices.push(*page_index);
+                        }
+                        collection_pages.push(collection_page.clone());
+                    }
+                    liquid_core::Value::Object(to_object(&collection_pages)?)
+                };
+                child_contexts.insert(collection_name.clone().into(), collection_object.clone());
+            }
             let some_rendered_indices = self.render_recursively(child.1, child_contexts)?;
             rendered_indices.extend(some_rendered_indices.iter());
         }
