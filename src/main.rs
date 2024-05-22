@@ -127,6 +127,7 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
             if let Ok(events) = receiver.recv()? {
                 for event in events {
                     match event.kind {
+                        // If a new page is created, insert it into the DAG.
                         EventKind::Create(_) => {
                             let parser = create_liquid_parser()?;
                             let global = get_global_context()?;
@@ -166,28 +167,35 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                     let global = get_global_context()?;
                                     let from_path = fs::canonicalize(event.paths[0].clone())?;
                                     let to_path = fs::canonicalize(event.paths[1].clone())?;
-                                    match to_path.is_file() {
-                                        true => {
-                                            let index = pages[&from_path];
-                                            pages.remove(&from_path);
-                                            pages.insert(to_path.clone(), index);
-                                            dag.remove_node(index);
-                                            insert_or_update_page(
-                                                to_path.clone(),
-                                                &mut dag,
-                                                &mut pages,
-                                                global.1.clone(),
-                                            )?;
-                                        }
-                                        false => {
-                                            for (page_path, index) in pages.clone().into_iter() {
-                                                if page_path.starts_with(&from_path) {
-                                                    pages.remove(&page_path);
-                                                    dag.remove_node(index);
-                                                }
+                                    // If the path is a file, update the page in the DAG.
+                                    if to_path.is_file() {
+                                        let index = pages[&from_path];
+                                        pages.remove(&from_path);
+                                        dag.remove_node(index);
+                                        insert_or_update_page(
+                                            to_path.clone(),
+                                            &mut dag,
+                                            &mut pages,
+                                            global.1.clone(),
+                                        )?;
+                                    }
+                                    // If the path is a directory, update all pages in the DAG.
+                                    else if to_path.is_dir() {
+                                        for (page_path, index) in pages.clone().into_iter() {
+                                            if page_path.starts_with(&from_path) {
+                                                let to_page_path = to_path
+                                                    .join(page_path.strip_prefix(&from_path)?);
+                                                pages.remove(&page_path);
+                                                dag.remove_node(index);
+                                                insert_or_update_page(
+                                                    to_page_path,
+                                                    &mut dag,
+                                                    &mut pages,
+                                                    global.1.clone(),
+                                                )?;
                                             }
                                         }
-                                    }
+                                    };
                                     let (updated_pages, updated_dag) = tokio::spawn(async move {
                                         generate_site(
                                             parser.clone(),
@@ -202,6 +210,7 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                 }
                                 _ => continue,
                             },
+                            // If a page is modified, update it in the DAG.
                             ModifyKind::Data(_) => {
                                 let parser = create_liquid_parser()?;
                                 let global = get_global_context()?;
@@ -237,6 +246,7 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                             _ => continue,
                         },
                         EventKind::Remove(remove_kind) => match remove_kind {
+                            // If a folder is removed, remove all pages in the folder from the DAG.
                             RemoveKind::Folder => {
                                 let parser = create_liquid_parser()?;
                                 let global = get_global_context()?;
@@ -259,6 +269,7 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                 .await??;
                                 dag = updated_dag;
                             }
+                            // If a file is removed, remove the page from the DAG.
                             RemoveKind::File => {
                                 let parser = create_liquid_parser()?;
                                 let global = get_global_context()?;
