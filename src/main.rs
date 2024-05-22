@@ -1,4 +1,6 @@
 use ahash::AHashMap;
+use clap::{arg, crate_version};
+use clap::{Parser, Subcommand};
 use daggy::{stable_dag::StableDag, NodeIndex};
 use glob::glob;
 use liquid::{object, Object};
@@ -20,9 +22,33 @@ use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+#[derive(Parser)]
+#[command(version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+#[derive(Subcommand)]
+enum Commands {
+    Build {
+        #[arg(short, long, default_value_t = false)]
+        watch: bool,
+    },
+    Serve {
+        #[arg(short, long, default_value_t = true)]
+        watch: bool,
+    },
+}
+
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing_subscriber::fmt().init();
+    let cli = Cli::parse();
+    match cli.command {
+        Some(Commands::Build { watch }) => build(watch).await?,
+        Some(Commands::Serve { watch }) => {}
+        None => println!("Vox {}", crate_version!()),
+    }
     Ok(())
 }
 

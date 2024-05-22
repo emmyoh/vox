@@ -23,7 +23,7 @@ required-features = ["cli"]
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde", "unstable-locales"] }
-clap = { version = "4.5.4", features = ["derive"], optional = true }
+clap = { version = "4.5.4", features = ["derive", "cargo"], optional = true }
 comrak = { version = "0.22.0", features = ["syntect", "shortcodes"], default-features = false }
 daggy = { version = "0.8.0", features = ["stable_dag"] }
 toml = "0.8.12"
