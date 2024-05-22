@@ -1,5 +1,5 @@
 use ahash::AHashMap;
-use daggy::{stable_dag::StableDag, Dag, NodeIndex};
+use daggy::{stable_dag::StableDag, NodeIndex};
 use glob::glob;
 use liquid::{object, Object};
 use mimalloc::MiMalloc;
@@ -7,19 +7,15 @@ use notify_debouncer_full::{
     new_debouncer,
     notify::{
         event::{ModifyKind, RemoveKind, RenameMode},
-        Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher,
+        EventKind, RecursiveMode, Watcher,
     },
-    DebounceEventResult,
 };
 use std::sync::mpsc::channel;
-use std::{error::Error, fs, path::PathBuf, str::FromStr, time::Duration};
+use std::{error::Error, fs, path::PathBuf, time::Duration};
 use ticky::Stopwatch;
 use toml::Table;
-use tracing::{debug, info};
-use vox::{
-    builds::Build, markdown_block::MarkdownBlock, math_block::MathBlock, page::Page,
-    templates::create_liquid_parser,
-};
+use tracing::info;
+use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -38,8 +34,17 @@ fn insert_or_update_page(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let entry = fs::canonicalize(entry)?;
     let page = path_to_page(entry.clone(), locale.clone())?;
-    let index = dag.add_node(page.clone());
-    pages.insert(entry, index.clone());
+    // If the page already exists in the DAG, update it. Otherwise, insert it.
+    let index = if pages.contains_key(&entry) {
+        let index = pages[&entry];
+        let node = dag.node_weight_mut(index).unwrap();
+        *node = page.clone();
+        index
+    } else {
+        let index = dag.add_node(page.clone());
+        pages.insert(entry, index);
+        index
+    };
 
     // A page's parents are its layout and the collections it depends on.
     // The DAG indices of the parents must be found.
@@ -49,11 +54,11 @@ fn insert_or_update_page(
     if let Some(layout) = layout {
         let layout = fs::canonicalize(layout)?;
         if let Some(index) = pages.get(&layout) {
-            parents.push(index.clone());
+            parents.push(*index);
         } else {
             let page = path_to_page(layout.clone(), locale.clone())?;
             let index = dag.add_node(page);
-            parents.push(index.clone());
+            parents.push(index);
             pages.insert(layout, index);
         }
     }
@@ -63,11 +68,11 @@ fn insert_or_update_page(
             for entry in glob(&format!("{}/**/*.vox", collection.to_string_lossy()))? {
                 let entry = fs::canonicalize(entry?)?;
                 if let Some(index) = pages.get(&entry) {
-                    parents.push(index.clone());
+                    parents.push(*index);
                 } else {
                     let page = path_to_page(entry.clone(), locale.clone())?;
                     let index = dag.add_node(page);
-                    parents.push(index.clone());
+                    parents.push(index);
                     pages.insert(entry, index);
                 }
             }
@@ -99,9 +104,7 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     // Write the initial site to the output directory.
     let (updated_pages, updated_dag) = tokio::spawn(async move {
-        Ok::<(Vec<NodeIndex>, StableDag<Page, ()>), Box<dyn Error + Send + Sync>>(
-            generate_site(parser.clone(), global.0.clone(), global.1.clone(), dag).await?,
-        )
+        generate_site(parser.clone(), global.0.clone(), global.1.clone(), dag).await
     })
     .await??;
     dag = updated_dag;
@@ -145,25 +148,58 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                 )?;
                             }
                             let (updated_pages, updated_dag) = tokio::spawn(async move {
-                                Ok::<
-                                    (Vec<NodeIndex>, StableDag<Page, ()>),
-                                    Box<dyn Error + Send + Sync>,
-                                >(
-                                    generate_site(
-                                        parser.clone(),
-                                        global.0.clone(),
-                                        global.1.clone(),
-                                        dag,
-                                    )
-                                    .await?,
+                                generate_site(
+                                    parser.clone(),
+                                    global.0.clone(),
+                                    global.1.clone(),
+                                    dag,
                                 )
+                                .await
                             })
                             .await??;
                             dag = updated_dag;
                         }
                         EventKind::Modify(modify_kind) => match modify_kind {
                             ModifyKind::Name(rename_mode) => match rename_mode {
-                                RenameMode::Both => {}
+                                RenameMode::Both => {
+                                    let parser = create_liquid_parser()?;
+                                    let global = get_global_context()?;
+                                    let from_path = fs::canonicalize(event.paths[0].clone())?;
+                                    let to_path = fs::canonicalize(event.paths[1].clone())?;
+                                    match to_path.is_file() {
+                                        true => {
+                                            let index = pages[&from_path];
+                                            pages.remove(&from_path);
+                                            pages.insert(to_path.clone(), index);
+                                            dag.remove_node(index);
+                                            insert_or_update_page(
+                                                to_path.clone(),
+                                                &mut dag,
+                                                &mut pages,
+                                                global.1.clone(),
+                                            )?;
+                                        }
+                                        false => {
+                                            for (page_path, index) in pages.clone().into_iter() {
+                                                if page_path.starts_with(&from_path) {
+                                                    pages.remove(&page_path);
+                                                    dag.remove_node(index);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    let (updated_pages, updated_dag) = tokio::spawn(async move {
+                                        generate_site(
+                                            parser.clone(),
+                                            global.0.clone(),
+                                            global.1.clone(),
+                                            dag,
+                                        )
+                                        .await
+                                    })
+                                    .await??;
+                                    dag = updated_dag;
+                                }
                                 _ => continue,
                             },
                             ModifyKind::Data(_) => {
@@ -187,18 +223,13 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                     )?;
                                 }
                                 let (updated_pages, updated_dag) = tokio::spawn(async move {
-                                    Ok::<
-                                        (Vec<NodeIndex>, StableDag<Page, ()>),
-                                        Box<dyn Error + Send + Sync>,
-                                    >(
-                                        generate_site(
-                                            parser.clone(),
-                                            global.0.clone(),
-                                            global.1.clone(),
-                                            dag,
-                                        )
-                                        .await?,
+                                    generate_site(
+                                        parser.clone(),
+                                        global.0.clone(),
+                                        global.1.clone(),
+                                        dag,
                                     )
+                                    .await
                                 })
                                 .await??;
                                 dag = updated_dag;
@@ -206,7 +237,28 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                             _ => continue,
                         },
                         EventKind::Remove(remove_kind) => match remove_kind {
-                            RemoveKind::Folder => {}
+                            RemoveKind::Folder => {
+                                let parser = create_liquid_parser()?;
+                                let global = get_global_context()?;
+                                let path = fs::canonicalize(event.paths[0].clone())?;
+                                for (page_path, index) in pages.clone().into_iter() {
+                                    if page_path.starts_with(&path) {
+                                        pages.remove(&page_path);
+                                        dag.remove_node(index);
+                                    }
+                                }
+                                let (updated_pages, updated_dag) = tokio::spawn(async move {
+                                    generate_site(
+                                        parser.clone(),
+                                        global.0.clone(),
+                                        global.1.clone(),
+                                        dag,
+                                    )
+                                    .await
+                                })
+                                .await??;
+                                dag = updated_dag;
+                            }
                             RemoveKind::File => {
                                 let parser = create_liquid_parser()?;
                                 let global = get_global_context()?;
@@ -227,18 +279,13 @@ async fn build(watch: bool) -> Result<(), Box<dyn Error + Send + Sync>> {
                                     }
                                 }
                                 let (updated_pages, updated_dag) = tokio::spawn(async move {
-                                    Ok::<
-                                        (Vec<NodeIndex>, StableDag<Page, ()>),
-                                        Box<dyn Error + Send + Sync>,
-                                    >(
-                                        generate_site(
-                                            parser.clone(),
-                                            global.0.clone(),
-                                            global.1.clone(),
-                                            dag,
-                                        )
-                                        .await?,
+                                    generate_site(
+                                        parser.clone(),
+                                        global.0.clone(),
+                                        global.1.clone(),
+                                        dag,
                                     )
+                                    .await
                                 })
                                 .await??;
                                 dag = updated_dag;
@@ -263,9 +310,9 @@ async fn generate_site(
 ) -> Result<(Vec<NodeIndex>, StableDag<Page, ()>), Box<dyn Error + Send + Sync>> {
     let mut timer = Stopwatch::start_new();
     let mut build = Build {
-        template_parser: template_parser,
-        contexts: contexts,
-        locale: locale,
+        template_parser,
+        contexts,
+        locale,
         dag,
     };
     let updated_pages = build.render_all()?;
@@ -284,7 +331,7 @@ async fn generate_site(
 }
 
 fn path_to_page(path: PathBuf, locale: String) -> Result<Page, Box<dyn Error + Send + Sync>> {
-    Ok(Page::new(fs::read_to_string(path.clone())?, path, locale)?)
+    Page::new(fs::read_to_string(path.clone())?, path, locale)
 }
 
 fn get_global_context() -> Result<(Object, String), Box<dyn Error + Send + Sync>> {

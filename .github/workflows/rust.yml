@@ -59,8 +59,10 @@ jobs:
       run: cargo fmt
     - name: Apply compiler suggestions
       run: |
-        cargo fix --edition --edition-idioms
-        cargo clippy --fix -Z unstable-options
+        cargo fix --edition --edition-idioms --allow-dirty
+        cargo clippy --fix -Z unstable-options --allow-dirty
+        cargo fix --edition --edition-idioms --bin vox --features="cli" --allow-dirty
+        cargo clippy --fix -Z unstable-options --bin vox --features="cli" --allow-dirty
     - name: Commit changes to code, if any
       run: |
         git config user.name github-actions
