@@ -1,3 +1,6 @@
+use actix_files::NamedFile;
+use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::{App, HttpServer};
 use ahash::AHashMap;
 use clap::{arg, crate_version};
 use clap::{Parser, Subcommand};
@@ -12,6 +15,8 @@ use notify_debouncer_full::{
         EventKind, RecursiveMode, Watcher,
     },
 };
+use std::net::Ipv4Addr;
+use std::path::Path;
 use std::sync::mpsc::channel;
 use std::{error::Error, fs, path::PathBuf, time::Duration};
 use ticky::Stopwatch;
@@ -37,6 +42,8 @@ enum Commands {
     Serve {
         #[arg(short, long, default_value_t = true)]
         watch: bool,
+        #[arg(short, long, default_value_t = 80)]
+        port: u16,
     },
 }
 
@@ -45,8 +52,40 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing_subscriber::fmt().init();
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Build { watch }) => build(watch).await?,
-        Some(Commands::Serve { watch }) => {}
+        Some(Commands::Build { watch }) => {
+            tokio::spawn(build(watch)).await??;
+        }
+        Some(Commands::Serve { watch, port }) => {
+            tokio::spawn(build(watch)).await??;
+            tokio::spawn(
+                HttpServer::new(|| {
+                    let mut service = actix_files::Files::new("/", "output")
+                        .prefer_utf8(true)
+                        .use_hidden_files()
+                        .use_etag(true)
+                        .use_last_modified(true)
+                        .show_files_listing()
+                        .redirect_to_slash_directory();
+                    if Path::new("output/index.html").is_file() {
+                        service = service.index_file("index.html");
+                    }
+                    if Path::new("output/404.html").is_file() {
+                        service = service.default_handler(|req: ServiceRequest| {
+                            let (http_req, _payload) = req.into_parts();
+                            async {
+                                let response =
+                                    NamedFile::open("output/404.html")?.into_response(&http_req);
+                                Ok(ServiceResponse::new(http_req, response))
+                            }
+                        });
+                    };
+                    App::new().service(service)
+                })
+                .bind((Ipv4Addr::UNSPECIFIED, port))?
+                .run(),
+            )
+            .await??;
+        }
         None => println!("Vox {}", crate_version!()),
     }
     Ok(())
