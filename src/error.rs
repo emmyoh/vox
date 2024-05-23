@@ -28,19 +28,19 @@ pub struct FrontmatterNotFound {
     pub src: NamedSource<String>,
 }
 
-#[derive(Error, Debug, Diagnostic)]
-#[error("Page date not found ({0}).\n{1}", src.name(), src.inner())]
-#[diagnostic(
-    code(page::date_not_found),
-    url(docsrs),
-    help("Please ensure that all pages have their date specified in their frontmatter before attempting builds.")
-)]
-/// Page date not found.
-pub struct DateNotFound {
-    #[source_code]
-    /// The page missing its date.
-    pub src: NamedSource<String>,
-}
+// #[derive(Error, Debug, Diagnostic)]
+// #[error("Page date not found ({0}).\n{1}", src.name(), src.inner())]
+// #[diagnostic(
+//     code(page::date_not_found),
+//     url(docsrs),
+//     help("Please ensure that all pages have their date specified in their frontmatter before attempting builds.")
+// )]
+// /// Page date not found.
+// pub struct DateNotFound {
+//     #[source_code]
+//     /// The page missing its date.
+//     pub src: NamedSource<String>,
+// }
 
 #[derive(Error, Debug, Diagnostic)]
 #[error("Page date not valid ({0}).\n{1}", src.name(), src.inner())]

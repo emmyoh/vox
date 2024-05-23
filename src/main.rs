@@ -39,28 +39,37 @@ struct Cli {
 }
 #[derive(Subcommand)]
 enum Commands {
+    /// Build the site.
     Build {
+        /// Watch for changes (defaults to `false`).
         #[arg(short, long, default_value_t = false)]
         watch: bool,
+        /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
+        #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
+        verbosity: u8,
+        /// Whether to visualise the DAG (defaults to `false`).
+        #[arg(short = 'd', long, default_value_t = false)]
+        visualise_dag: bool,
     },
+    /// Serve the site.
     Serve {
+        /// Watch for changes (defaults to `true`).
         #[arg(short, long, default_value_t = true)]
         watch: bool,
+        /// The port to serve the site on.
         #[arg(short, long, default_value_t = 80)]
         port: u16,
+        /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
+        #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
+        verbosity: u8,
+        /// Whether to visualise the DAG (defaults to `false`).
+        #[arg(short = 'd', long, default_value_t = false)]
+        visualise_dag: bool,
     },
 }
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> miette::Result<()> {
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_thread_ids(true)
-        .with_thread_names(true)
-        .with_file(true)
-        .with_line_number(true)
-        .with_max_level(Level::TRACE)
-        .init();
     // miette::set_hook(Box::new(|_| {
     //     Box::new(
     //         miette::MietteHandlerOpts::new()
@@ -75,13 +84,58 @@ async fn main() -> miette::Result<()> {
     // }))?;
     let cli = Cli::parse();
     match cli.command {
-        Some(Commands::Build { watch }) => {
+        Some(Commands::Build {
+            watch,
+            verbosity,
+            visualise_dag,
+        }) => {
+            let verbosity_level = match verbosity {
+                0 => Level::ERROR,
+                1 => Level::WARN,
+                2 => Level::INFO,
+                3 => Level::DEBUG,
+                4 => Level::TRACE,
+                _ => Level::TRACE,
+            };
+            tracing_subscriber::fmt()
+                .pretty()
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_max_level(verbosity_level)
+                .init();
             info!("Building … ");
-            tokio::spawn(build(watch)).await.into_diagnostic()??;
+            tokio::spawn(build(watch, visualise_dag))
+                .await
+                .into_diagnostic()??;
         }
-        Some(Commands::Serve { watch, port }) => {
-            info!("Serving … ");
-            tokio::spawn(build(watch)).await.into_diagnostic()??;
+        Some(Commands::Serve {
+            watch,
+            port,
+            verbosity,
+            visualise_dag,
+        }) => {
+            let verbosity_level = match verbosity {
+                0 => Level::ERROR,
+                1 => Level::WARN,
+                2 => Level::INFO,
+                3 => Level::DEBUG,
+                4 => Level::TRACE,
+                _ => Level::TRACE,
+            };
+            tracing_subscriber::fmt()
+                .pretty()
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_max_level(verbosity_level)
+                .init();
+            println!("Serving on {}:{} … ", Ipv4Addr::UNSPECIFIED, port);
+            tokio::spawn(build(watch, visualise_dag))
+                .await
+                .into_diagnostic()??;
             tokio::spawn(
                 HttpServer::new(|| {
                     let mut service = actix_files::Files::new("/", "output")
@@ -220,7 +274,7 @@ fn insert_or_update_page(
     Ok(())
 }
 
-async fn build(watch: bool) -> miette::Result<()> {
+async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
     let parser = create_liquid_parser()?;
     let global = get_global_context()?;
     let mut dag = StableDag::new();
@@ -259,7 +313,14 @@ async fn build(watch: bool) -> miette::Result<()> {
     // Write the initial site to the output directory.
     info!("Performing initial build … ");
     let (_updated_pages, updated_dag) = tokio::spawn(async move {
-        generate_site(parser.clone(), global.0.clone(), global.1.clone(), dag).await
+        generate_site(
+            parser.clone(),
+            global.0.clone(),
+            global.1.clone(),
+            dag,
+            visualise_dag,
+        )
+        .await
     })
     .await
     .into_diagnostic()??;
@@ -321,6 +382,7 @@ async fn build(watch: bool) -> miette::Result<()> {
                                     global.0.clone(),
                                     global.1.clone(),
                                     dag,
+                                    visualise_dag,
                                 )
                                 .await
                             })
@@ -385,6 +447,7 @@ async fn build(watch: bool) -> miette::Result<()> {
                                             global.0.clone(),
                                             global.1.clone(),
                                             dag,
+                                            visualise_dag,
                                         )
                                         .await
                                     })
@@ -425,6 +488,7 @@ async fn build(watch: bool) -> miette::Result<()> {
                                         global.0.clone(),
                                         global.1.clone(),
                                         dag,
+                                        visualise_dag,
                                     )
                                     .await
                                 })
@@ -454,6 +518,7 @@ async fn build(watch: bool) -> miette::Result<()> {
                                         global.0.clone(),
                                         global.1.clone(),
                                         dag,
+                                        visualise_dag,
                                     )
                                     .await
                                 })
@@ -488,6 +553,7 @@ async fn build(watch: bool) -> miette::Result<()> {
                                         global.0.clone(),
                                         global.1.clone(),
                                         dag,
+                                        visualise_dag,
                                     )
                                     .await
                                 })
@@ -539,6 +605,7 @@ async fn generate_site(
     contexts: liquid::Object,
     locale: String,
     dag: StableDag<Page, EdgeType>,
+    visualise_dag: bool,
 ) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
     let mut timer = Stopwatch::start_new();
     let mut build = Build {
@@ -547,7 +614,7 @@ async fn generate_site(
         locale,
         dag,
     };
-    let updated_pages = build.render_all()?;
+    let updated_pages = build.render_all(visualise_dag)?;
     info!("{} pages were rendered … ", updated_pages.len());
     for updated_page_index in updated_pages.iter() {
         let updated_page = &build.dag.graph()[*updated_page_index];
@@ -595,7 +662,7 @@ async fn generate_site(
             .into_diagnostic()?;
     }
     timer.stop();
-    info!(
+    println!(
         "Generated {} pages in {:.2} seconds … ",
         updated_pages.len(),
         timer.elapsed_s()

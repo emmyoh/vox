@@ -8,9 +8,9 @@ use daggy::{
     stable_dag::StableDag,
     NodeIndex, Walker,
 };
-use layout::backends::svg::SVGWriter;
 use layout::gv::DotParser;
 use layout::gv::GraphBuilder;
+use layout::{backends::svg::SVGWriter, core::color::Color, std_shapes::shapes::ShapeKind};
 use liquid::{to_object, Object, Parser};
 use liquid_core::to_value;
 use miette::IntoDiagnostic;
@@ -57,6 +57,14 @@ impl Build {
             gb.visit_graph(&tree);
             let mut vg = gb.get();
             let mut svg = SVGWriter::new();
+            for node_handle in vg.iter_nodes() {
+                let node = vg.element_mut(node_handle);
+                let old_shape = node.shape.clone();
+                if let ShapeKind::Circle(label) = old_shape {
+                    node.shape = ShapeKind::Box(label);
+                    node.look.fill_color = Some(Color::fast("#FFDFBA"));
+                }
+            }
             vg.do_it(false, false, false, &mut svg);
             let content = svg.finalize();
             std::fs::create_dir_all("output").into_diagnostic()?;
@@ -72,9 +80,11 @@ impl Build {
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_all(&mut self) -> miette::Result<Vec<NodeIndex>> {
+    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<Vec<NodeIndex>> {
         info!("Rendering all pages … ");
-        self.visualise_dag()?;
+        if visualise_dag {
+            self.visualise_dag()?;
+        }
         let mut rendered_indices = Vec::new();
         let root_indices = self.find_root_indices();
         debug!("Root indices: {:?}", root_indices);
