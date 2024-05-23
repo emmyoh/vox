@@ -204,7 +204,11 @@ impl Build {
         let root_page = self.dag.node_weight_mut(root_index).unwrap();
         if root_page.render(&root_contexts, &self.template_parser)? {
             rendered_indices.push(root_index);
-            debug!("After rendering `{}`: {:#?}", root_page.to_path_string(), root_page);
+            debug!(
+                "After rendering `{}`: {:#?}",
+                root_page.to_path_string(),
+                root_page
+            );
         }
 
         let children = self

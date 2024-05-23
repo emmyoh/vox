@@ -155,7 +155,6 @@ fn insert_or_update_page(
         debug!("{:#?}", page);
         (page, index)
     };
-    
 
     // A page's parents are pages in the collections it depends on. Its layout is a child.
     let layout = page.layout.clone();
@@ -235,11 +234,25 @@ async fn build(watch: bool) -> miette::Result<()> {
         if Page::is_layout_path(&entry)? {
             continue;
         }
-        insert_or_update_page(entry, None, &mut dag, &mut pages, &mut layouts, global.1.clone())?;
+        insert_or_update_page(
+            entry,
+            None,
+            &mut dag,
+            &mut pages,
+            &mut layouts,
+            global.1.clone(),
+        )?;
     }
     // We update the layouts with their parents and children once all other pages have been inserted.
     for (layout, (_layout_parent_path, layout_path)) in layouts.clone() {
-        insert_or_update_page(layout_path, Some(layout), &mut dag, &mut pages, &mut layouts, global.1.clone())?;
+        insert_or_update_page(
+            layout_path,
+            Some(layout),
+            &mut dag,
+            &mut pages,
+            &mut layouts,
+            global.1.clone(),
+        )?;
     }
 
     // Write the initial site to the output directory.
@@ -325,7 +338,10 @@ async fn build(watch: bool) -> miette::Result<()> {
                                         .into_diagnostic()?;
                                     info!("Renaming occurred: {:?} → {:?}", from_path, to_path);
                                     // If the path is a file, update the page in the DAG.
-                                    if to_path.is_file() && to_path.extension().unwrap_or_default() == "vox" && !Page::is_layout_path(&to_path)?{
+                                    if to_path.is_file()
+                                        && to_path.extension().unwrap_or_default() == "vox"
+                                        && !Page::is_layout_path(&to_path)?
+                                    {
                                         info!("Renaming page … ");
                                         let index = pages[&from_path];
                                         pages.remove(&from_path);
