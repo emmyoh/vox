@@ -1,7 +1,7 @@
 use glob::glob;
+use miette::IntoDiagnostic;
 use std::{
     borrow::Cow,
-    error::Error,
     path::{Path, PathBuf},
 };
 
@@ -32,7 +32,7 @@ impl SnippetSource {
                     if entry.file_type().unwrap().is_file() {
                         let name = entry
                             .path()
-                            .file_stem()
+                            .file_name()
                             .unwrap()
                             .to_string_lossy()
                             .to_string();
@@ -59,14 +59,14 @@ impl liquid::partials::PartialSource for SnippetSource {
 
     fn try_get(&self, name: &str) -> Option<Cow<str>> {
         let path = PathBuf::from(format!("snippets/{}", name));
-        if path.exists() {
-            return Some(std::fs::read_to_string(path).unwrap().into());
-        }
-        let path = glob(&format!("snippets/{}.*", name))
-            .unwrap()
-            .next()
-            .unwrap()
-            .unwrap();
+        // if path.exists() {
+        //     return Some(std::fs::read_to_string(path).unwrap().into());
+        // }
+        // let path = glob(&format!("snippets/{}.*", name))
+        //     .unwrap()
+        //     .next()
+        //     .unwrap()
+        //     .unwrap();
         Some(std::fs::read_to_string(path).unwrap().into())
     }
 }
@@ -76,11 +76,11 @@ impl liquid::partials::PartialSource for SnippetSource {
 /// # Returns
 ///
 /// A Liquid parser with custom tags and filters.
-pub fn create_liquid_parser() -> Result<liquid::Parser, Box<dyn Error + Send + Sync>> {
+pub fn create_liquid_parser() -> miette::Result<liquid::Parser> {
     let mut partials = SnippetSource::new();
     partials.update_list();
     let partial_compiler = liquid::partials::EagerCompiler::new(partials);
-    Ok(liquid::ParserBuilder::with_stdlib()
+    liquid::ParserBuilder::with_stdlib()
         .tag(liquid_lib::jekyll::IncludeTag)
         .filter(liquid_lib::jekyll::ArrayToSentenceString)
         .filter(liquid_lib::jekyll::Pop)
@@ -93,5 +93,6 @@ pub fn create_liquid_parser() -> Result<liquid::Parser, Box<dyn Error + Send + S
         .block(MathBlock)
         .block(MarkdownBlock)
         .partials(partial_compiler)
-        .build()?)
+        .build()
+        .into_diagnostic()
 }

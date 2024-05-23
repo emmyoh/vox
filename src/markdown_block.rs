@@ -81,7 +81,7 @@ impl ParseBlock for MarkdownBlock {
         mut arguments: TagTokenIter<'_>,
         mut tokens: TagBlock<'_, '_>,
         _options: &Language,
-    ) -> Result<Box<dyn Renderable>> {
+    ) -> Result<Box<(dyn Renderable + 'static)>, liquid::Error> {
         arguments.expect_nothing()?;
 
         let raw_content = tokens.escape_liquid(false)?.to_string();
@@ -102,7 +102,11 @@ struct Markdown {
 }
 
 impl Renderable for Markdown {
-    fn render_to(&self, writer: &mut dyn Write, _runtime: &dyn Runtime) -> Result<()> {
+    fn render_to(
+        &self,
+        writer: &mut dyn Write,
+        _runtime: &dyn Runtime,
+    ) -> Result<(), liquid::Error> {
         write!(writer, "{}", self.content).replace("Failed to render")?;
         Ok(())
     }

@@ -15,7 +15,7 @@ use thiserror::Error;
 // }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("Frontmatter not found.")]
+#[error("Frontmatter not found ({0}).\n{1}", src.name(), src.inner())]
 #[diagnostic(
     code(page::frontmatter_not_found),
     url(docsrs),
@@ -29,7 +29,7 @@ pub struct FrontmatterNotFound {
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("Page date not found.")]
+#[error("Page date not found ({0}).\n{1}", src.name(), src.inner())]
 #[diagnostic(
     code(page::date_not_found),
     url(docsrs),
@@ -43,7 +43,21 @@ pub struct DateNotFound {
 }
 
 #[derive(Error, Debug, Diagnostic)]
-#[error("Invalid list of dependent collections.")]
+#[error("Page date not valid ({0}).\n{1}", src.name(), src.inner())]
+#[diagnostic(
+    code(page::date_not_valid),
+    url(docsrs),
+    help("Please ensure that all pages have their date specified correctly before attempting builds.")
+)]
+/// Page date not valid.
+pub struct DateNotValid {
+    #[source_code]
+    /// The page with an invalid date.
+    pub src: NamedSource<String>,
+}
+
+#[derive(Error, Debug, Diagnostic)]
+#[error("Invalid list of dependent collections ({0}).\n{1}", src.name(), src.inner())]
 #[diagnostic(
     code(page::invalid_collections_property),
     url(docsrs),
