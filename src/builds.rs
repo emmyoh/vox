@@ -101,12 +101,15 @@ impl Build {
         root_index: NodeIndex,
         rendered_indices: &mut Vec<NodeIndex>,
     ) -> miette::Result<()> {
-        // If the page has already been rendered, return early to avoid rendering it again.
-        // Since a page can be a child of multiple pages, a render call can be made multiple times.
-        if rendered_indices.contains(&root_index) {
-            debug!("Page already rendered: {:?}. Skipping … ", root_index);
-            return Ok(());
-        }
+        // // If the page has already been rendered, return early to avoid rendering it again.
+        // // Since a page can be a child of multiple pages, a render call can be made multiple times.
+        // if rendered_indices.contains(&root_index) {
+        //     debug!(
+        //         "Page already rendered: `{}`. Skipping … ",
+        //         self.dag.graph()[root_index].to_path_string()
+        //     );
+        //     // return Ok(());
+        // }
         let current_directory =
             fs::canonicalize(env::current_dir().into_diagnostic()?).into_diagnostic()?;
         let root_page = self.dag.graph()[root_index].to_owned();
@@ -191,7 +194,7 @@ impl Build {
                         .unwrap()
                 })
                 .collect();
-            debug!("{:?} pages: {:?}", collection_name, collection_pages);
+            debug!("`{}` pages: {:#?}", collection_name, collection_pages);
             let collection_object = to_value(&collection_pages).into_diagnostic()?;
             // liquid_core::Value::Array(to_object(&collection_pages).into_diagnostic()?);
             root_contexts.insert(collection_name.clone().into(), collection_object.clone());

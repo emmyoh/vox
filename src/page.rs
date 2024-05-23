@@ -94,7 +94,11 @@ impl Page {
             .components()
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
-        Ok(Some(path_components[0].clone()))
+        let first_path_component = path_components[0].clone();
+        if Path::new(first_path_component.as_str()).is_file() {
+            return Ok(None);
+        }
+        Ok(Some(first_path_component))
     }
 
     /// Determine if a page is a layout.

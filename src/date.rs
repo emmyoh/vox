@@ -9,6 +9,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
 use sys_locale::get_locale;
+use tracing::trace;
 
 #[derive(Eq, PartialEq, PartialOrd, Clone, Default, Debug, Serialize, Deserialize)]
 /// A page's date-time metadata
@@ -146,5 +147,6 @@ pub fn default_locale() -> chrono::Locale {
 
 /// Gets a `chrono::Locale` from a string
 pub fn locale_string_to_locale(locale: String) -> chrono::Locale {
+    trace!("Locale: {}", locale);
     chrono::Locale::try_from(locale.as_str()).unwrap_or(default_locale())
 }

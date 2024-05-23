@@ -25,6 +25,7 @@ use ticky::Stopwatch;
 use toml::Table;
 use tracing::{debug, info, warn, Level};
 use vox::builds::EdgeType;
+use vox::date::{self};
 use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 
 #[global_allocator]
@@ -506,6 +507,33 @@ async fn build(watch: bool) -> miette::Result<()> {
     Ok(())
 }
 
+fn get_layout_url(
+    layout_node_index: &NodeIndex,
+    dag: &StableDag<Page, EdgeType>,
+) -> Option<String> {
+    let layout_node = dag.graph()[*layout_node_index].clone();
+    if !layout_node.url.is_empty() {
+        return Some(layout_node.url);
+    }
+
+    let parents = dag
+        .parents(*layout_node_index)
+        .iter(dag)
+        .collect::<Vec<_>>();
+    let mut result = String::new();
+    for parent in parents {
+        if *dag.edge_weight(parent.0).unwrap() != EdgeType::Layout {
+            continue;
+        }
+        result = get_layout_url(&parent.1, dag)?;
+    }
+    if result.is_empty() {
+        None
+    } else {
+        Some(result)
+    }
+}
+
 async fn generate_site(
     template_parser: liquid::Parser,
     contexts: liquid::Object,
@@ -526,23 +554,24 @@ async fn generate_site(
         // If a page has no URL, it may be a layout.
         // Layouts contain rendered content but must be written using their parent's URL.
         let output_path = if updated_page.url.is_empty() {
-            let mut output_path = None;
-            let parents = build
-                .dag
-                .parents(*updated_page_index)
-                .iter(&build.dag)
-                .collect::<Vec<_>>();
-            for parent in parents {
-                if *build.dag.edge_weight(parent.0).unwrap() != EdgeType::Layout {
-                    continue;
-                }
-                let parent = &build.dag.graph()[parent.1];
-                if !parent.url.is_empty() {
-                    output_path = Some(format!("output/{}", parent.url));
-                    break;
-                }
-            }
-            output_path
+            // let mut output_path = None;
+            // let parents = build
+            //     .dag
+            //     .parents(*updated_page_index)
+            //     .iter(&build.dag)
+            //     .collect::<Vec<_>>();
+            // for parent in parents {
+            //     if *build.dag.edge_weight(parent.0).unwrap() != EdgeType::Layout {
+            //         continue;
+            //     }
+            //     let parent = &build.dag.graph()[parent.1];
+            //     if !parent.url.is_empty() {
+            //         output_path = Some(format!("output/{}", parent.url));
+            //         break;
+            //     }
+            // }
+            let layout_url = get_layout_url(updated_page_index, &build.dag);
+            layout_url.map(|layout_url| format!("output/{}", layout_url))
         } else if !updated_page.url.is_empty() {
             Some(format!("output/{}", updated_page.url))
         } else {
@@ -585,11 +614,15 @@ fn path_to_page(path: PathBuf, locale: String) -> miette::Result<Page> {
 fn get_global_context() -> miette::Result<(Object, String)> {
     let global_context = match fs::read_to_string("global.toml") {
         Ok(global_file) => global_file.parse::<Table>().into_diagnostic()?,
-        Err(_) => "locale = 'en_US'".parse::<Table>().into_diagnostic()?,
+        Err(_) => format!("locale = '{}'", date::default_locale_string())
+            .parse::<Table>()
+            .into_diagnostic()?,
     };
     let locale: String = global_context
         .get("locale")
-        .unwrap_or(&toml::Value::String("en_US".to_string()))
+        .unwrap_or(&toml::Value::String(date::default_locale_string()))
+        .as_str()
+        .unwrap_or(&date::default_locale_string())
         .to_string();
     Ok((
         object!({
