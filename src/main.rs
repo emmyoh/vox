@@ -121,7 +121,11 @@ async fn main() -> miette::Result<()> {
                 loop {
                     let building = tokio::spawn(build(watch, visualise_dag));
                     match building.await {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            if !watch {
+                                break;
+                            }
+                        }
                         Err(err) => {
                             error!("Building failed: {:#?}", err);
                             info!("Retrying in 5 seconds … ");
@@ -166,7 +170,11 @@ async fn main() -> miette::Result<()> {
                 loop {
                     let building = tokio::spawn(build(watch, visualise_dag));
                     match building.await {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            if !watch {
+                                break;
+                            }
+                        }
                         Err(err) => {
                             error!("Building failed: {:#?}", err);
                             info!("Retrying in 5 seconds … ");
