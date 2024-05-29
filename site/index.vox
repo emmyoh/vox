@@ -1,0 +1,36 @@
+---
+layout = "default"
+permalink = "index.html"
+---
+
+{% markdown %}
+
+Vox is a static site generator that leverages technologies you know & love to build & deploy sites faster than any other static site generator available today.
+
+## Features
+* Fast build times ({% math %}<0.5{% endmath %} seconds for a medium-sized site).
+* Intelligent rebuilding.
+* Flexible data model, perfect for any static site.
+* Industry-standard languages (Liquid & TOML).
+* Comes as a single binary, able to build or serve sites.
+* Built site can be deployed anywhere.
+
+## Resources
+* <a href="{{ global.url | append: "/diary" }}">Developer Diary</a>
+* [Developer Documentation](https://emmyoh.github.io/vox/vox/)
+
+## Overview
+{% raw %}
+Sites have the following structure: 
+- A `global.toml` file. Anything here defines the `{{ global }}` context.
+- `.vox` files:
+    - Inside the `layouts` folder, defining pages which other pages can use as a template; layout pages provide the `{{ layout }}` context to their child pages.
+    - Inside any other subdirectory, defining pages inside a collection; a collection provides its own context, referred to by the name of the subdirectory.
+    - Inside the root folder, defining pages not inside a collection.
+- `.voxs` files:
+    - Inside the `snippets` folder, defining partial pages which can be embedded in other pages.
+- Anything else is simply ignored.
+All of the items above are optional; even the `global.toml` file is optional if no page requires it.
+{% endraw %}
+
+{% endmarkdown %}

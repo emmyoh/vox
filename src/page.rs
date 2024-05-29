@@ -95,10 +95,50 @@ impl Page {
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
         let first_path_component = path_components[0].clone();
+        if first_path_component == "layouts" {
+            return Ok(None);
+        }
         if Path::new(first_path_component.as_str()).is_file() {
             return Ok(None);
         }
         Ok(Some(first_path_component))
+    }
+
+    /// Determine if two pages are equivalent despite their rendered content.
+    ///
+    /// # Arguments
+    ///
+    /// * `lhs` - The first page to compare.
+    ///
+    /// * `rhs` - The second page to compare.
+    ///
+    /// # Returns
+    ///
+    /// Whether or not the two pages are equivalent.
+    pub fn are_equivalent(lhs: &Page, rhs: &Page) -> bool {
+        lhs.data == rhs.data
+            && lhs.content == rhs.content
+            && lhs.permalink == rhs.permalink
+            && lhs.date == rhs.date
+            && lhs.collections == rhs.collections
+            && lhs.layout == rhs.layout
+            && lhs.directory == rhs.directory
+            && lhs.name == rhs.name
+            && lhs.collection == rhs.collection
+            && lhs.is_layout == rhs.is_layout
+    }
+
+    /// Determine if a page is equivalent to another page aside from rendered content.
+    ///
+    /// # Arguments
+    ///
+    /// * `other` - The page to compare to.
+    ///
+    /// # Returns
+    ///
+    /// Whether or not the two pages are equivalent.
+    pub fn is_equivalent(&self, other: &Page) -> bool {
+        Self::are_equivalent(self, other)
     }
 
     /// Determine if a page is a layout.

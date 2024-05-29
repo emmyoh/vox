@@ -2,13 +2,12 @@ use comrak::markdown_to_html_with_plugins;
 use comrak::plugins::syntect::SyntectAdapter;
 use comrak::ComrakPlugins;
 use comrak::ListStyleType;
-use liquid_core::error::ResultLiquidReplaceExt;
+use liquid_core::parser;
+use liquid_core::runtime;
 use liquid_core::Language;
 use liquid_core::Renderable;
 use liquid_core::Result;
-use liquid_core::Runtime;
 use liquid_core::{BlockReflection, ParseBlock, TagBlock, TagTokenIter};
-use std::io::Write;
 
 /// Render Markdown as HTML
 ///
@@ -29,9 +28,9 @@ pub fn render_markdown(text_to_render: String) -> String {
     options.extension.front_matter_delimiter = None;
     options.extension.multiline_block_quotes = true;
     options.extension.math_dollars = true;
-    options.extension.math_code = false;
+    options.extension.math_code = true;
     options.extension.shortcodes = true;
-    options.parse.smart = true;
+    options.parse.smart = false;
     options.parse.default_info_string = None;
     options.parse.relaxed_tasklist_matching = true;
     options.parse.relaxed_autolinks = true;
@@ -80,15 +79,21 @@ impl ParseBlock for MarkdownBlock {
         &self,
         mut arguments: TagTokenIter<'_>,
         mut tokens: TagBlock<'_, '_>,
-        _options: &Language,
+        options: &Language,
     ) -> Result<Box<(dyn Renderable + 'static)>, liquid::Error> {
         arguments.expect_nothing()?;
 
         let raw_content = tokens.escape_liquid(false)?.to_string();
+        // let runtime = RuntimeBuilder::new().build();
         let content = render_markdown(raw_content);
+        let renderable = parser::parse(&html_escape::decode_html_entities(&content), options)
+            .map(runtime::Template::new)
+            .unwrap();
+        // .render(&runtime)?;
 
         tokens.assert_empty();
-        Ok(Box::new(Markdown { content }))
+        // Ok(Box::new(Markdown { content }))
+        Ok(Box::new(renderable))
     }
 
     fn reflection(&self) -> &dyn BlockReflection {
@@ -96,18 +101,18 @@ impl ParseBlock for MarkdownBlock {
     }
 }
 
-#[derive(Clone, Debug)]
-struct Markdown {
-    content: String,
-}
+// #[derive(Clone, Debug)]
+// struct Markdown {
+//     content: String,
+// }
 
-impl Renderable for Markdown {
-    fn render_to(
-        &self,
-        writer: &mut dyn Write,
-        _runtime: &dyn Runtime,
-    ) -> Result<(), liquid::Error> {
-        write!(writer, "{}", self.content).replace("Failed to render")?;
-        Ok(())
-    }
-}
+// impl Renderable for Markdown {
+//     fn render_to(
+//         &self,
+//         writer: &mut dyn Write,
+//         _runtime: &dyn Runtime,
+//     ) -> Result<(), liquid::Error> {
+//         write!(writer, "{}", self.content).replace("Failed to render")?;
+//         Ok(())
+//     }
+// }

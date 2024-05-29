@@ -1,0 +1,5 @@
+---
+collections = ["diary"]
+permalink = "diary/atom.xml"
+---
+{% include atom.voxs posts = diary %}

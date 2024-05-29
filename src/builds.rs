@@ -61,8 +61,19 @@ impl Build {
                 let node = vg.element_mut(node_handle);
                 let old_shape = node.shape.clone();
                 if let ShapeKind::Circle(label) = old_shape {
-                    node.shape = ShapeKind::Box(label);
-                    node.look.fill_color = Some(Color::fast("#FFDFBA"));
+                    node.shape = ShapeKind::Box(label.clone());
+                    if Page::is_layout_path(label.clone())? {
+                        node.look.fill_color = Some(Color::fast("#FFDFBA"));
+                    } else {
+                        match Page::get_collection_name_from_path(label)? {
+                            Some(_) => {
+                                node.look.fill_color = Some(Color::fast("#DAFFBA"));
+                            }
+                            None => {
+                                node.look.fill_color = Some(Color::fast("#BADAFF"));
+                            }
+                        }
+                    }
                 }
             }
             vg.do_it(false, false, false, &mut svg);
@@ -73,6 +84,31 @@ impl Build {
             warn!("Unable to visualise the DAG.")
         }
         Ok(())
+    }
+
+    /// Get all descendants of a page in a DAG.
+    ///
+    /// # Arguments
+    ///
+    /// * `dag` - The DAG to search.
+    ///
+    /// * `root_index` - The index of the page in the DAG.
+    ///
+    /// # Returns
+    ///
+    /// A list of indices of all descendants of the page.
+    pub fn get_descendants(
+        dag: &StableDag<Page, EdgeType>,
+        root_index: NodeIndex,
+    ) -> Vec<NodeIndex> {
+        let mut descendants = Vec::new();
+        let children = dag.children(root_index).iter(dag).collect::<Vec<_>>();
+        for child in children {
+            descendants.push(child.1);
+            let child_descendants = Build::get_descendants(dag, child.1);
+            descendants.extend(child_descendants);
+        }
+        descendants
     }
 
     /// Render all pages in the DAG.
@@ -95,7 +131,7 @@ impl Build {
         Ok(rendered_indices)
     }
 
-    /// Render a page and its child pages.
+    /// Render a page and its descendant pages.
     ///
     /// # Arguments
     ///

@@ -1,0 +1,19 @@
+---
+layout = "default"
+collections = ["diary"]
+permalink = "diary/index.html"
+---
+{% assign posts = diary | sort: "diary.date" %}
+<div class="posts">
+  {% for post in posts %}
+  <article class="post">
+    <h1 class="post-title">
+      <a href="{{ post.url | prepend: global.url }}">
+        {{ post.data.title }}
+      </a>
+    </h1>
+    <time datetime="{{ post.date.rfc_2822 }}" class="post-date">{{ post.date.short_day }}, {{ post.date.day }} {{ post.date.short_month }} {{ post.date.year }}</time>
+    {{ post.rendered }}
+  </article>
+  {% endfor %}
+</div>

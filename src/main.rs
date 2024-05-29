@@ -1,7 +1,7 @@
 use actix_files::NamedFile;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::{App, HttpServer};
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet, HashSet, HashSetExt};
 use clap::{arg, crate_version};
 use clap::{Parser, Subcommand};
 use daggy::Walker;
@@ -12,18 +12,16 @@ use miette::{Context, IntoDiagnostic};
 use mimalloc::MiMalloc;
 use notify_debouncer_full::{
     new_debouncer,
-    notify::{
-        event::{ModifyKind, RemoveKind, RenameMode},
-        EventKind, RecursiveMode, Watcher,
-    },
+    notify::{RecursiveMode, Watcher},
 };
 use std::net::Ipv4Addr;
 use std::path::Path;
 use std::sync::mpsc::channel;
 use std::{fs, path::PathBuf, time::Duration};
 use ticky::Stopwatch;
+use tokio::time::{sleep, Instant};
 use toml::Table;
-use tracing::{debug, info, warn, Level};
+use tracing::{debug, error, info, trace, warn, Level};
 use vox::builds::EdgeType;
 use vox::date::{self};
 use vox::{builds::Build, page::Page, templates::create_liquid_parser};
@@ -41,20 +39,26 @@ struct Cli {
 enum Commands {
     /// Build the site.
     Build {
-        /// Watch for changes (defaults to `false`).
+        /// An optional path to the site directory.
+        #[arg(default_value = None)]
+        path: Option<PathBuf>,
+        /// Watch for changes.
         #[arg(short, long, default_value_t = false)]
         watch: bool,
         /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
         #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
         verbosity: u8,
-        /// Whether to visualise the DAG (defaults to `false`).
+        /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
     },
     /// Serve the site.
     Serve {
-        /// Watch for changes (defaults to `true`).
-        #[arg(short, long, default_value_t = true)]
+        /// An optional path to the site directory.
+        #[arg(default_value = None)]
+        path: Option<PathBuf>,
+        /// Watch for changes.
+        #[arg(short, long, default_value_t = false)]
         watch: bool,
         /// The port to serve the site on.
         #[arg(short, long, default_value_t = 80)]
@@ -62,7 +66,7 @@ enum Commands {
         /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
         #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
         verbosity: u8,
-        /// Whether to visualise the DAG (defaults to `false`).
+        /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
     },
@@ -85,10 +89,14 @@ async fn main() -> miette::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Build {
+            path,
             watch,
             verbosity,
             visualise_dag,
         }) => {
+            if let Some(path) = path {
+                std::env::set_current_dir(path).into_diagnostic()?;
+            }
             let verbosity_level = match verbosity {
                 0 => Level::ERROR,
                 1 => Level::WARN,
@@ -97,25 +105,44 @@ async fn main() -> miette::Result<()> {
                 4 => Level::TRACE,
                 _ => Level::TRACE,
             };
-            tracing_subscriber::fmt()
+            let mut subscriber_builder = tracing_subscriber::fmt()
                 .pretty()
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_max_level(verbosity_level)
-                .init();
+                .with_max_level(verbosity_level);
+            if verbosity >= 3 {
+                subscriber_builder = subscriber_builder
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .with_file(true)
+                    .with_line_number(true);
+            }
+            subscriber_builder.init();
             info!("Building … ");
-            tokio::spawn(build(watch, visualise_dag))
-                .await
-                .into_diagnostic()??;
+            let build_loop = tokio::spawn(async move {
+                loop {
+                    let building = tokio::spawn(build(watch, visualise_dag));
+                    match building.await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Building failed: {:#?}", err);
+                            info!("Retrying in 5 seconds … ");
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    }
+                }
+            });
+            build_loop.await.into_diagnostic()?;
         }
         Some(Commands::Serve {
+            path,
             watch,
             port,
             verbosity,
             visualise_dag,
         }) => {
+            if let Some(path) = path {
+                std::env::set_current_dir(path).into_diagnostic()?;
+            }
             let verbosity_level = match verbosity {
                 0 => Level::ERROR,
                 1 => Level::WARN,
@@ -124,49 +151,87 @@ async fn main() -> miette::Result<()> {
                 4 => Level::TRACE,
                 _ => Level::TRACE,
             };
-            tracing_subscriber::fmt()
+            let mut subscriber_builder = tracing_subscriber::fmt()
                 .pretty()
-                .with_thread_ids(true)
-                .with_thread_names(true)
-                .with_file(true)
-                .with_line_number(true)
-                .with_max_level(verbosity_level)
-                .init();
-            println!("Serving on {}:{} … ", Ipv4Addr::UNSPECIFIED, port);
-            tokio::spawn(build(watch, visualise_dag))
-                .await
-                .into_diagnostic()??;
-            tokio::spawn(
-                HttpServer::new(|| {
-                    let mut service = actix_files::Files::new("/", "output")
-                        .prefer_utf8(true)
-                        .use_hidden_files()
-                        .use_etag(true)
-                        .use_last_modified(true)
-                        .show_files_listing()
-                        .redirect_to_slash_directory();
-                    if Path::new("output/index.html").is_file() {
-                        service = service.index_file("index.html");
+                .with_max_level(verbosity_level);
+            if verbosity >= 3 {
+                subscriber_builder = subscriber_builder
+                    .with_thread_ids(true)
+                    .with_thread_names(true)
+                    .with_file(true)
+                    .with_line_number(true);
+            }
+            subscriber_builder.init();
+            let build_loop = tokio::spawn(async move {
+                loop {
+                    let building = tokio::spawn(build(watch, visualise_dag));
+                    match building.await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Building failed: {:#?}", err);
+                            info!("Retrying in 5 seconds … ");
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
                     }
-                    if Path::new("output/404.html").is_file() {
-                        service = service.default_handler(|req: ServiceRequest| {
-                            let (http_req, _payload) = req.into_parts();
-                            async {
-                                let response =
-                                    NamedFile::open("output/404.html")?.into_response(&http_req);
-                                Ok(ServiceResponse::new(http_req, response))
-                            }
-                        });
-                    };
-                    App::new().service(service)
-                })
-                .bind((Ipv4Addr::UNSPECIFIED, port))
-                .into_diagnostic()?
-                .run(),
-            )
-            .await
-            .into_diagnostic()?
-            .into_diagnostic()?;
+                }
+            });
+            let serve_loop = tokio::spawn(async move {
+                loop {
+                    let serving = tokio::spawn(
+                        HttpServer::new(|| {
+                            let mut service = actix_files::Files::new("/", "output")
+                                .prefer_utf8(true)
+                                .use_hidden_files()
+                                .use_etag(true)
+                                .use_last_modified(true)
+                                .show_files_listing()
+                                .redirect_to_slash_directory();
+                            // if Path::new("output/index.html").is_file() {
+                            service = service.index_file("index.html");
+                            // }
+                            // if Path::new("output/404.html").is_file() {
+                            service = service.default_handler(|req: ServiceRequest| {
+                                let (http_req, _payload) = req.into_parts();
+                                async {
+                                    let response = NamedFile::open("output/404.html")?
+                                        .into_response(&http_req);
+                                    Ok(ServiceResponse::new(http_req, response))
+                                }
+                            });
+                            // };
+                            App::new().service(service)
+                        })
+                        .bind((Ipv4Addr::UNSPECIFIED, port))
+                        .unwrap()
+                        .run(),
+                    );
+                    println!("Serving on {}:{} … ", Ipv4Addr::UNSPECIFIED, port);
+                    match serving.await {
+                        Ok(_) => {}
+                        Err(err) => {
+                            error!("Serving failed: {:#?}", err);
+                            info!("Retrying in 5 seconds … ");
+                            sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
+                    }
+                }
+            });
+            tokio::spawn(async move {
+                match tokio::signal::ctrl_c().await {
+                    Ok(()) => {
+                        info!("Exiting … ");
+                        std::process::exit(0);
+                    }
+                    Err(err) => {
+                        error!("Unable to listen for shutdown signal: {}", err);
+                        std::process::exit(0);
+                    }
+                }
+            });
+            build_loop.await.into_diagnostic()?;
+            serve_loop.await.into_diagnostic()?;
         }
         None => println!("Vox {}", crate_version!()),
     };
@@ -178,7 +243,8 @@ fn insert_or_update_page(
     layout_index: Option<NodeIndex>,
     dag: &mut StableDag<Page, EdgeType>,
     pages: &mut AHashMap<PathBuf, NodeIndex>,
-    layouts: &mut AHashMap<NodeIndex, (PathBuf, PathBuf)>,
+    layouts: &mut AHashMap<PathBuf, HashSet<NodeIndex>>,
+    collection_dependents: &mut AHashMap<String, HashSet<NodeIndex>>,
     locale: String,
 ) -> miette::Result<()> {
     let entry = fs::canonicalize(entry).into_diagnostic()?;
@@ -214,12 +280,33 @@ fn insert_or_update_page(
     // A page's parents are pages in the collections it depends on. Its layout is a child.
     let layout = page.layout.clone();
     let collections = page.collections.clone();
-    debug!("Layout: {:?} … ", layout);
-    debug!("Collections: {:?} … ", collections);
+    debug!("Layout used: {:?} … ", layout);
+    debug!("Collections used: {:?} … ", collections);
     if let Some(layout) = layout {
+        // Layouts are inserted multiple times, once for each page that uses them.
         let layout_path = fs::canonicalize(format!("layouts/{}.vox", layout))
             .into_diagnostic()
             .with_context(|| format!("Layout not found: `layouts/{}.vox`", layout))?;
+        let children = dag.children(index).iter(dag).collect::<Vec<_>>();
+        // If this page is being updated, the old layout should be replaced with the current one in the DAG.
+        let old_layout = children
+            .iter()
+            .find(|child| *dag.edge_weight(child.0).unwrap() == EdgeType::Layout);
+        if let Some(old_layout) = old_layout {
+            trace!("Removing old layout … ");
+            dag.remove_node(old_layout.1);
+        }
+        info!("Inserting layout: {:?} … ", layout_path);
+        let layout_page = path_to_page(layout_path.clone(), locale.clone())?;
+        debug!("{:#?}", layout_page);
+        let layout_index = dag.add_child(index, EdgeType::Layout, layout_page);
+        if let Some(layouts) = layouts.get_mut(&layout_path) {
+            layouts.insert(layout_index.1);
+        } else {
+            let mut new_set = HashSet::new();
+            new_set.insert(layout_index.1);
+            layouts.insert(layout_path.clone(), new_set);
+        }
         // if pages.get(&layout_path).is_none() {
         //     info!("Inserting layout: {:?} … ", layout_path);
         //     let layout_page = path_to_page(layout_path.clone(), locale.clone())?;
@@ -236,15 +323,17 @@ fn insert_or_update_page(
         //     dag.add_edge(index, layout_index, EdgeType::Layout)
         //         .into_diagnostic()?;
         // }
-        // Layouts are inserted multiple times, once for each page that uses them.
-        info!("Inserting layout: {:?} … ", layout_path);
-        let layout_page = path_to_page(layout_path.clone(), locale.clone())?;
-        debug!("{:#?}", layout_page);
-        let layout_index = dag.add_child(index, EdgeType::Layout, layout_page);
-        layouts.insert(layout_index.1, (page.to_path_string().into(), layout_path));
+        // layouts_by_index.insert(layout_index.1, (page.to_path_string().into(), layout_path));
     }
     if let Some(collections) = collections {
         for collection in collections {
+            if let Some(collection_dependents) = collection_dependents.get_mut(&collection) {
+                collection_dependents.insert(index);
+            } else {
+                let mut new_set = HashSet::new();
+                new_set.insert(index);
+                collection_dependents.insert(collection.clone(), new_set);
+            }
             let collection = fs::canonicalize(collection).into_diagnostic()?;
             for entry in
                 glob(&format!("{}/**/*.vox", collection.to_string_lossy())).into_diagnostic()?
@@ -279,7 +368,9 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
     let global = get_global_context()?;
     let mut dag = StableDag::new();
     let mut pages: AHashMap<PathBuf, NodeIndex> = AHashMap::new();
-    let mut layouts: AHashMap<NodeIndex, (PathBuf, PathBuf)> = AHashMap::new();
+    // let mut layouts_by_index: AHashMap<NodeIndex, (PathBuf, PathBuf)> = AHashMap::new();
+    let mut layouts: AHashMap<PathBuf, HashSet<NodeIndex>> = AHashMap::new();
+    let mut collection_dependents: AHashMap<String, HashSet<NodeIndex>> = AHashMap::new();
 
     // Initial DAG construction.
     info!("Constructing DAG … ");
@@ -295,39 +386,39 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
             &mut dag,
             &mut pages,
             &mut layouts,
+            &mut collection_dependents,
             global.1.clone(),
         )?;
     }
     // We update the layouts with their parents and children once all other pages have been inserted.
-    for (layout, (_layout_parent_path, layout_path)) in layouts.clone() {
-        insert_or_update_page(
-            layout_path,
-            Some(layout),
-            &mut dag,
-            &mut pages,
-            &mut layouts,
-            global.1.clone(),
-        )?;
+    // for (layout, (_layout_parent_path, layout_path)) in layouts_by_index.clone() {
+    for (layout_path, layout_indices) in layouts.clone() {
+        for layout_index in layout_indices {
+            insert_or_update_page(
+                layout_path.clone(),
+                Some(layout_index),
+                &mut dag,
+                &mut pages,
+                &mut layouts,
+                &mut collection_dependents,
+                global.1.clone(),
+            )?;
+        }
     }
 
     // Write the initial site to the output directory.
     info!("Performing initial build … ");
-    let (_updated_pages, updated_dag) = tokio::spawn(async move {
-        generate_site(
-            parser.clone(),
-            global.0.clone(),
-            global.1.clone(),
-            dag,
-            visualise_dag,
-        )
-        .await
-    })
-    .await
-    .into_diagnostic()??;
+    let (_updated_pages, updated_dag) = generate_site(
+        parser.clone(),
+        global.0.clone(),
+        global.1.clone(),
+        dag,
+        visualise_dag,
+    )
+    .await?;
     dag = updated_dag;
 
     // Watch for changes to the site.
-    info!("Watching for changes … ");
     if watch {
         let current_path = std::env::current_dir().into_diagnostic()?;
         let output_path = current_path.join("output");
@@ -335,238 +426,200 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
         let (sender, receiver) = channel();
         let mut debouncer =
             new_debouncer(Duration::from_secs(1), None, sender).into_diagnostic()?;
+        info!("Watching {:?} … ", current_path);
         debouncer
             .watcher()
             .watch(&current_path, RecursiveMode::Recursive)
             .into_diagnostic()?;
-        // Changes to the output directory or version control are irrelevant.
-        debouncer.watcher().unwatch(&git_path).into_diagnostic()?;
-        debouncer
-            .watcher()
-            .unwatch(&output_path)
-            .into_diagnostic()?;
+        // info!("Ignoring changes to {:?} … ", git_path);
+        // debouncer.watcher().unwatch(&git_path).into_diagnostic()?;
+        // info!("Ignoring changes to {:?} … ", output_path);
+        // debouncer
+        //     .watcher()
+        //     .unwatch(&output_path)
+        //     .into_diagnostic()?;
 
+        let mut changed_times = Vec::new();
         loop {
             if let Ok(events) = receiver.recv().into_diagnostic()? {
-                for event in events {
-                    match event.kind {
-                        // If a new page is created, insert it into the DAG.
-                        EventKind::Create(_) => {
-                            info!("New files created … ");
-                            let parser = create_liquid_parser()?;
-                            let global = get_global_context()?;
-                            let page_paths: Vec<&PathBuf> = event
-                                .paths
-                                .iter()
-                                .filter(|path| {
-                                    path.exists()
-                                        && path.is_file()
-                                        && path.extension().unwrap_or_default() == "vox"
-                                        && !Page::is_layout_path(path).unwrap()
-                                })
-                                .collect();
-                            debug!("Pages created: {:?}", page_paths);
-                            for path in page_paths {
-                                insert_or_update_page(
-                                    path.clone(),
-                                    None,
-                                    &mut dag,
-                                    &mut pages,
-                                    &mut layouts,
-                                    global.1.clone(),
-                                )?;
-                            }
-                            let (_updated_pages, updated_dag) = tokio::spawn(async move {
-                                generate_site(
-                                    parser.clone(),
-                                    global.0.clone(),
-                                    global.1.clone(),
-                                    dag,
-                                    visualise_dag,
-                                )
-                                .await
-                            })
-                            .await
-                            .into_diagnostic()??;
-                            dag = updated_dag;
-                        }
-                        EventKind::Modify(modify_kind) => match modify_kind {
-                            ModifyKind::Name(rename_mode) => match rename_mode {
-                                RenameMode::Both => {
-                                    let parser = create_liquid_parser()?;
-                                    let global = get_global_context()?;
-                                    let from_path = fs::canonicalize(event.paths[0].clone())
-                                        .into_diagnostic()?;
-                                    let to_path = fs::canonicalize(event.paths[1].clone())
-                                        .into_diagnostic()?;
-                                    info!("Renaming occurred: {:?} → {:?}", from_path, to_path);
-                                    // If the path is a file, update the page in the DAG.
-                                    if to_path.is_file()
-                                        && to_path.extension().unwrap_or_default() == "vox"
-                                        && !Page::is_layout_path(&to_path)?
-                                    {
-                                        info!("Renaming page … ");
-                                        let index = pages[&from_path];
-                                        pages.remove(&from_path);
-                                        dag.remove_node(index);
-                                        insert_or_update_page(
-                                            to_path.clone(),
-                                            None,
-                                            &mut dag,
-                                            &mut pages,
-                                            &mut layouts,
-                                            global.1.clone(),
-                                        )?;
-                                    }
-                                    // If the path is a directory, update all pages in the DAG.
-                                    else if to_path.is_dir() {
-                                        info!("Renaming directory … ");
-                                        for (page_path, index) in pages.clone().into_iter() {
-                                            if page_path.starts_with(&from_path) {
-                                                let to_page_path = to_path.join(
-                                                    page_path
-                                                        .strip_prefix(&from_path)
-                                                        .into_diagnostic()?,
-                                                );
-                                                pages.remove(&page_path);
-                                                dag.remove_node(index);
-                                                insert_or_update_page(
-                                                    to_page_path,
-                                                    None,
-                                                    &mut dag,
-                                                    &mut pages,
-                                                    &mut layouts,
-                                                    global.1.clone(),
-                                                )?;
-                                            }
-                                        }
-                                    };
-                                    let (_updated_pages, updated_dag) = tokio::spawn(async move {
-                                        generate_site(
-                                            parser.clone(),
-                                            global.0.clone(),
-                                            global.1.clone(),
-                                            dag,
-                                            visualise_dag,
-                                        )
-                                        .await
-                                    })
-                                    .await
-                                    .into_diagnostic()??;
-                                    dag = updated_dag;
-                                }
-                                _ => continue,
-                            },
-                            // If a page is modified, update it in the DAG.
-                            ModifyKind::Data(_) => {
-                                let parser = create_liquid_parser()?;
-                                let global = get_global_context()?;
-                                let page_paths: Vec<&PathBuf> = event
-                                    .paths
-                                    .iter()
-                                    .filter(|path| {
-                                        path.exists()
-                                            && path.is_file()
-                                            && path.extension().unwrap_or_default() == "vox"
-                                            && !Page::is_layout_path(path).unwrap()
-                                    })
-                                    .collect();
-                                info!("Pages were modified: {:#?}", page_paths);
-                                for path in page_paths {
-                                    insert_or_update_page(
-                                        path.clone(),
-                                        None,
-                                        &mut dag,
-                                        &mut pages,
-                                        &mut layouts,
-                                        global.1.clone(),
-                                    )?;
-                                }
-                                let (_updated_pages, updated_dag) = tokio::spawn(async move {
-                                    generate_site(
-                                        parser.clone(),
-                                        global.0.clone(),
-                                        global.1.clone(),
-                                        dag,
-                                        visualise_dag,
-                                    )
-                                    .await
-                                })
-                                .await
-                                .into_diagnostic()??;
-                                dag = updated_dag;
-                            }
-                            _ => continue,
-                        },
-                        EventKind::Remove(remove_kind) => match remove_kind {
-                            // If a folder is removed, remove all pages in the folder from the DAG.
-                            RemoveKind::Folder => {
-                                let parser = create_liquid_parser()?;
-                                let global = get_global_context()?;
-                                let path =
-                                    fs::canonicalize(event.paths[0].clone()).into_diagnostic()?;
-                                info!("Folder was removed: {:?}", path);
-                                for (page_path, index) in pages.clone().into_iter() {
-                                    if page_path.starts_with(&path) {
-                                        pages.remove(&page_path);
-                                        dag.remove_node(index);
-                                    }
-                                }
-                                let (_updated_pages, updated_dag) = tokio::spawn(async move {
-                                    generate_site(
-                                        parser.clone(),
-                                        global.0.clone(),
-                                        global.1.clone(),
-                                        dag,
-                                        visualise_dag,
-                                    )
-                                    .await
-                                })
-                                .await
-                                .into_diagnostic()??;
-                                dag = updated_dag;
-                            }
-                            // If a file is removed, remove the page from the DAG.
-                            RemoveKind::File => {
-                                let parser = create_liquid_parser()?;
-                                let global = get_global_context()?;
-                                let page_paths: Vec<&PathBuf> = event
-                                    .paths
-                                    .iter()
-                                    .filter(|path| {
-                                        !path.exists()
-                                            && path.is_file()
-                                            && path.extension().unwrap_or_default() == "vox"
-                                    })
-                                    .collect();
-                                info!("Pages were removed: {:#?}", page_paths);
-                                for path in page_paths {
-                                    let path = fs::canonicalize(path).into_diagnostic()?;
-                                    if let Some(index) = pages.get(&path) {
-                                        dag.remove_node(*index);
-                                        pages.remove(&path);
-                                    }
-                                }
-                                let (_updated_pages, updated_dag) = tokio::spawn(async move {
-                                    generate_site(
-                                        parser.clone(),
-                                        global.0.clone(),
-                                        global.1.clone(),
-                                        dag,
-                                        visualise_dag,
-                                    )
-                                    .await
-                                })
-                                .await
-                                .into_diagnostic()??;
-                                dag = updated_dag;
-                            }
-                            _ => continue,
-                        },
-                        _ => continue,
+                // Changes to the output directory or version control are irrelevant.
+                if !events.iter().any(|event| {
+                    event
+                        .paths
+                        .iter()
+                        .any(|path| !path.starts_with(&output_path) && !path.starts_with(&git_path))
+                }) {
+                    continue;
+                }
+                debug!("Changes detected: {:#?} … ", events);
+                changed_times.push(Instant::now());
+            }
+            if changed_times.len() > 1 {
+                let first = changed_times.remove(0);
+                if first.elapsed() < Duration::from_secs(1) {
+                    continue;
+                }
+            }
+
+            // 1. Build a new DAG.
+            let parser = create_liquid_parser()?;
+            let global = get_global_context()?;
+            let mut new_dag = StableDag::new();
+            let mut new_pages: AHashMap<PathBuf, NodeIndex> = AHashMap::new();
+            let mut new_layouts: AHashMap<PathBuf, HashSet<NodeIndex>> = AHashMap::new();
+            let mut new_collection_dependents: AHashMap<String, HashSet<NodeIndex>> =
+                AHashMap::new();
+
+            // New DAG construction.
+            info!("Constructing DAG … ");
+            for entry in glob("**/*.vox").into_diagnostic()? {
+                let entry = fs::canonicalize(entry.into_diagnostic()?).into_diagnostic()?;
+                if Page::is_layout_path(&entry)? {
+                    continue;
+                }
+                insert_or_update_page(
+                    entry,
+                    None,
+                    &mut new_dag,
+                    &mut new_pages,
+                    &mut new_layouts,
+                    &mut new_collection_dependents,
+                    global.1.clone(),
+                )?;
+            }
+            for (layout_path, layout_indices) in new_layouts.clone() {
+                for layout_index in layout_indices {
+                    insert_or_update_page(
+                        layout_path.clone(),
+                        Some(layout_index),
+                        &mut new_dag,
+                        &mut new_pages,
+                        &mut new_layouts,
+                        &mut new_collection_dependents,
+                        global.1.clone(),
+                    )?;
+                }
+            }
+
+            // 2. Obtain the difference between the old and new DAGs; ie, calculate the set of added or modified nodes.
+            //     - A node is modified if it has the same label, but its page is different (not comparing `url` or `rendered`).
+            //         - If a node's page is the same (excluding `url` or `rendered`), it is unchanged.
+            //     - A node is added if its label appears in the new DAG, but not the old one.
+            //     - A node is removed if its label appears in the old DAG, but not the new one.
+
+            // let old_dag_node_weights = Into::<Graph<Page, EdgeType>>::into(dag.graph().clone()).raw_nodes().iter().map(|node| node.weight.clone()).collect::<Vec<_>>();
+            // let new_dag_node_weights = Into::<Graph<Page, EdgeType>>::into(new_dag.graph().clone()).raw_nodes().iter().map(|node| node.weight.clone()).collect::<Vec<_>>();
+            // let mut old_dag_pages = AHashMap::new();
+            // for page in old_dag_node_weights {
+            //     let page_label = page.to_path_string();
+            //     old_dag_pages.insert(page.to_path_string(), page);
+            // }
+            // // let old_dag_node_indices = dag.graph().node_indices().collect::<Vec<_>>();
+            let mut old_dag_pages = AHashMap::new();
+            for (page_path, page_index) in &pages {
+                let page = dag.node_weight(*page_index).unwrap();
+                old_dag_pages.insert(page_path.clone(), page);
+            }
+            let mut new_dag_pages = AHashMap::new();
+            for (page_path, page_index) in &new_pages {
+                let page = new_dag.node_weight(*page_index).unwrap();
+                new_dag_pages.insert(page_path.clone(), page);
+            }
+            let mut updated_pages = AHashSet::new();
+            for (page_path, new_page) in new_dag_pages {
+                if let Some(old_page) = old_dag_pages.get(&page_path) {
+                    // If the page has been modified, its index is noted.
+                    if !new_page.is_equivalent(old_page) {
+                        updated_pages.insert(new_pages[&page_path]);
+                    }
+                } else {
+                    // If the page is new, its index is noted.
+                    updated_pages.insert(new_pages[&page_path]);
+                }
+            }
+            // No need to continue if no pages were added or changed.
+            if updated_pages.is_empty() {
+                continue;
+            }
+
+            // 3. Compute which pages need to be rendered, noting their node IDs.
+            //     - All pages that were modified need to be re-rendered.
+            //         - Their descendants in the new DAG also need to be rendered.
+            //     - All pages that were added need to be rendered.
+            //         - Their descendants in the new DAG also need to be rendered.
+            //     - Nothing is done with the pages that were removed. Necessary changes are covered by the two cases above.
+
+            let mut pages_to_render = updated_pages.clone();
+            for updated_page_index in updated_pages.clone() {
+                let descendants = Build::get_descendants(&new_dag, updated_page_index);
+                for descendant in descendants {
+                    pages_to_render.insert(descendant);
+                }
+            }
+
+            // 4. Merge the DAGs.
+            //     - In the new DAG, replace all pages not needing rendering with their rendered counterparts from the old DAG.
+
+            for (page_path, page_index) in &new_pages {
+                if !pages_to_render.contains(page_index) {
+                    // Pages may be added, so it is necessary to check if the page already exists in the old DAG.
+                    if let Some(old_page) = dag.node_weight(pages[page_path]) {
+                        let mut _new_page = new_dag.node_weight_mut(*page_index).unwrap();
+                        _new_page = &mut old_page.clone();
                     }
                 }
             }
+            dag = new_dag;
+
+            // 5. Render & output the appropriate pages.
+            info!("Rebuilding … ");
+            let mut timer = Stopwatch::start_new();
+            let mut build = Build {
+                template_parser: parser,
+                contexts: global.0,
+                locale: global.1,
+                dag,
+            };
+            let mut rendered_pages = Vec::new();
+            for page in updated_pages.iter() {
+                build.render_recursively(*page, &mut rendered_pages)?;
+            }
+
+            info!("{} pages were rendered … ", rendered_pages.len());
+            for updated_page_index in rendered_pages.iter() {
+                let updated_page = &build.dag.graph()[*updated_page_index];
+                let output_path = if updated_page.url.is_empty() {
+                    let layout_url = get_layout_url(updated_page_index, &build.dag);
+                    layout_url.map(|layout_url| format!("output/{}", layout_url))
+                } else if !updated_page.url.is_empty() {
+                    Some(format!("output/{}", updated_page.url))
+                } else {
+                    None
+                };
+                if output_path.is_none() {
+                    warn!("Page has no URL: {:#?} … ", updated_page.to_path_string());
+                    continue;
+                }
+                let output_path = output_path.unwrap();
+                info!("Writing to {} … ", output_path);
+                tokio::fs::create_dir_all(
+                    Path::new(&output_path)
+                        .parent()
+                        .unwrap_or(Path::new(&output_path)),
+                )
+                .await
+                .into_diagnostic()?;
+                tokio::fs::write(output_path, updated_page.rendered.clone())
+                    .await
+                    .into_diagnostic()?;
+            }
+            timer.stop();
+            println!(
+                "Generated {} pages in {:.2} seconds … ",
+                updated_pages.len(),
+                timer.elapsed_s()
+            );
+            dag = build.dag;
         }
     }
 
