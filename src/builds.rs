@@ -1,5 +1,5 @@
 use crate::page::Page;
-use ahash::AHashMap;
+use ahash::{AHashMap, AHashSet};
 use chrono::Locale;
 use daggy::{
     petgraph::{
@@ -119,23 +119,72 @@ impl Build {
         descendants
     }
 
+    /// Get all ancestors of a page in a DAG.
+    ///
+    /// # Arguments
+    ///
+    /// * `dag` - The DAG to search.
+    ///
+    /// * `root_index` - The index of the page in the DAG.
+    ///
+    /// # Returns
+    ///
+    /// A list of indices of all ancestors of the page.
+    pub fn get_ancestors(dag: &StableDag<Page, EdgeType>, root_index: NodeIndex) -> Vec<NodeIndex> {
+        let mut ancestors = Vec::new();
+        let parents = dag.parents(root_index).iter(dag).collect::<Vec<_>>();
+        for parent in parents {
+            ancestors.push(parent.1);
+            let parent_ancestors = Build::get_ancestors(dag, parent.1);
+            ancestors.extend(parent_ancestors);
+        }
+        ancestors
+    }
+
+    /// Get all ancestors of a page in a DAG that are not layout pages.
+    ///
+    /// # Arguments
+    ///
+    /// * `dag` - The DAG to search.
+    ///
+    /// * `root_index` - The index of the page in the DAG.
+    ///
+    /// # Returns
+    ///
+    /// A list of indices of all ancestors of the page that are not layout pages.
+    pub fn get_non_layout_ancestors(
+        dag: &StableDag<Page, EdgeType>,
+        root_index: NodeIndex,
+    ) -> miette::Result<Vec<NodeIndex>> {
+        let mut ancestors = Vec::new();
+        let parents = dag.parents(root_index).iter(dag).collect::<Vec<_>>();
+        for parent in parents {
+            let parent_page = &dag.graph()[parent.1];
+            if !parent_page.is_layout()? {
+                ancestors.push(parent.1);
+            }
+            let parent_ancestors = Build::get_non_layout_ancestors(dag, parent.1)?;
+            ancestors.extend(parent_ancestors);
+        }
+        Ok(ancestors)
+    }
+
     /// Render all pages in the DAG.
     ///
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<Vec<NodeIndex>> {
+    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<AHashSet<NodeIndex>> {
         info!("Rendering all pages … ");
         if visualise_dag {
             self.visualise_dag()?;
         }
-        let mut rendered_indices = Vec::new();
+        let mut rendered_indices = AHashSet::new();
         let root_indices = self.find_root_indices();
         debug!("Root indices: {:?}", root_indices);
         for root_index in root_indices {
             self.render_recursively(root_index, &mut rendered_indices)?;
         }
-        rendered_indices.dedup();
         Ok(rendered_indices)
     }
 
@@ -153,7 +202,7 @@ impl Build {
     pub fn render_recursively(
         &mut self,
         root_index: NodeIndex,
-        rendered_indices: &mut Vec<NodeIndex>,
+        rendered_indices: &mut AHashSet<NodeIndex>,
     ) -> miette::Result<()> {
         // // If the page has already been rendered, return early to avoid rendering it again.
         // // Since a page can be a child of multiple pages, a render call can be made multiple times.
@@ -262,7 +311,7 @@ impl Build {
         );
         let root_page = self.dag.node_weight_mut(root_index).unwrap();
         if root_page.render(&root_contexts, &self.template_parser)? {
-            rendered_indices.push(root_index);
+            rendered_indices.insert(root_index);
             debug!(
                 "After rendering `{}`: {:#?}",
                 root_page.to_path_string(),
@@ -373,7 +422,6 @@ impl Build {
             // }
             self.render_recursively(child.1, rendered_indices)?;
         }
-        rendered_indices.dedup();
         Ok(())
     }
 

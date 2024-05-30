@@ -46,7 +46,7 @@ enum Commands {
         /// Watch for changes.
         #[arg(short, long, default_value_t = false)]
         watch: bool,
-        /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
+        /// The level of log output; warnings, information, debugging messages, and trace logs.
         #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
         verbosity: u8,
         /// Visualise the DAG.
@@ -64,7 +64,7 @@ enum Commands {
         /// The port to serve the site on.
         #[arg(short, long, default_value_t = 80)]
         port: u16,
-        /// The level of log output; recoverable errors, warnings, information, debugging information, and trace information.
+        /// The level of log output; warnings, information, debugging messages, and trace logs.
         #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
         verbosity: u8,
         /// Visualise the DAG.
@@ -551,6 +551,55 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     added_or_modified.insert(new_pages[page_path]);
                 }
             }
+            // The ancestors of modified or added layouts are themselves modified or added.
+            for (layout_path, new_layout_indices) in &new_layouts {
+                let new_layout = new_dag
+                    .node_weight(*new_layout_indices.iter().last().unwrap())
+                    .unwrap();
+                if let Some(old_layout_indices) = layouts.get(layout_path) {
+                    let old_layout = dag
+                        .node_weight(*old_layout_indices.iter().last().unwrap())
+                        .unwrap();
+                    // Layout has been modified.
+                    if !new_layout.is_equivalent(old_layout) {
+                        for new_layout_index in new_layout_indices {
+                            let ancestors =
+                                Build::get_non_layout_ancestors(&new_dag, *new_layout_index)?;
+                            for ancestor in ancestors {
+                                added_or_modified.insert(ancestor);
+                            }
+                        }
+                    }
+                } else {
+                    // Layout is new.
+                    for new_layout_index in new_layout_indices {
+                        let ancestors =
+                            Build::get_non_layout_ancestors(&new_dag, *new_layout_index)?;
+                        for ancestor in ancestors {
+                            added_or_modified.insert(ancestor);
+                        }
+                    }
+                }
+            }
+            // The ancestors of removed layouts are modified.
+            for (layout_path, old_layout_indices) in &layouts {
+                if new_layouts.get(layout_path).is_none() {
+                    for old_layout_index in old_layout_indices {
+                        let ancestors = Build::get_non_layout_ancestors(&dag, *old_layout_index)?;
+                        let ancestor_paths = ancestors
+                            .iter()
+                            .map(|ancestor| {
+                                PathBuf::from(dag.node_weight(*ancestor).unwrap().to_path_string())
+                            })
+                            .collect::<Vec<_>>();
+                        for ancestor_path in ancestor_paths {
+                            if let Some(ancestor_index) = new_pages.get(&ancestor_path) {
+                                added_or_modified.insert(*ancestor_index);
+                            }
+                        }
+                    }
+                }
+            }
             for (page_path, _old_page) in old_dag_pages.iter() {
                 if new_dag_pages.get(page_path).is_none() {
                     // If the page has been removed, its index is noted.
@@ -651,6 +700,9 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 locale: global.1,
                 dag,
             };
+            if visualise_dag {
+                build.visualise_dag()?;
+            }
 
             // Delete the output of removed pages.
             for removed_output_path in removed_output_paths {
@@ -660,27 +712,31 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     .into_diagnostic()?;
             }
 
-            let mut rendered_pages = Vec::new();
+            let mut rendered_pages = AHashSet::new();
+            info!(
+                "Rendering root pages: {:#?} … ",
+                root_pages_to_render
+                    .iter()
+                    .map(|index| build.dag.graph()[*index].to_path_string())
+                    .collect::<Vec<_>>()
+            );
             for page in root_pages_to_render.iter() {
                 build.render_recursively(*page, &mut rendered_pages)?;
             }
 
             for updated_page_index in rendered_pages.iter() {
                 let updated_page = &build.dag.graph()[*updated_page_index];
-                let output_path = if updated_page.url.is_empty() {
-                    let layout_url = get_layout_url(updated_page_index, &build.dag);
-                    layout_url.map(|layout_url| format!("output/{}", layout_url))
-                } else if !updated_page.url.is_empty() {
-                    Some(format!("output/{}", updated_page.url))
-                } else {
-                    None
-                };
+                let output_path = get_output_path(updated_page, updated_page_index, &build);
                 if output_path.is_none() {
                     warn!("Page has no URL: {:#?} … ", updated_page.to_path_string());
                     continue;
                 }
                 let output_path = output_path.unwrap();
-                info!("Writing to `{}` … ", output_path);
+                info!(
+                    "Writing `{}` to `{}` … ",
+                    updated_page.to_path_string(),
+                    output_path
+                );
                 tokio::fs::create_dir_all(
                     Path::new(&output_path)
                         .parent()
@@ -732,13 +788,27 @@ fn get_layout_url(
     }
 }
 
+fn get_output_path(page: &Page, page_index: &NodeIndex, build: &Build) -> Option<String> {
+    // If a page has no URL, it may be a layout.
+    // Layouts contain rendered content but must be written using their parent's URL.
+
+    if page.url.is_empty() {
+        let layout_url = get_layout_url(page_index, &build.dag);
+        layout_url.map(|layout_url| format!("output/{}", layout_url))
+    } else if !page.url.is_empty() {
+        Some(format!("output/{}", page.url))
+    } else {
+        None
+    }
+}
+
 async fn generate_site(
     template_parser: liquid::Parser,
     contexts: liquid::Object,
     locale: Locale,
     dag: StableDag<Page, EdgeType>,
     visualise_dag: bool,
-) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
+) -> miette::Result<(AHashSet<NodeIndex>, StableDag<Page, EdgeType>)> {
     let mut timer = Stopwatch::start_new();
     let mut build = Build {
         template_parser,
@@ -752,36 +822,17 @@ async fn generate_site(
         let updated_page = &build.dag.graph()[*updated_page_index];
         // If a page has no URL, it may be a layout.
         // Layouts contain rendered content but must be written using their parent's URL.
-        let output_path = if updated_page.url.is_empty() {
-            // let mut output_path = None;
-            // let parents = build
-            //     .dag
-            //     .parents(*updated_page_index)
-            //     .iter(&build.dag)
-            //     .collect::<Vec<_>>();
-            // for parent in parents {
-            //     if *build.dag.edge_weight(parent.0).unwrap() != EdgeType::Layout {
-            //         continue;
-            //     }
-            //     let parent = &build.dag.graph()[parent.1];
-            //     if !parent.url.is_empty() {
-            //         output_path = Some(format!("output/{}", parent.url));
-            //         break;
-            //     }
-            // }
-            let layout_url = get_layout_url(updated_page_index, &build.dag);
-            layout_url.map(|layout_url| format!("output/{}", layout_url))
-        } else if !updated_page.url.is_empty() {
-            Some(format!("output/{}", updated_page.url))
-        } else {
-            None
-        };
+        let output_path = get_output_path(updated_page, updated_page_index, &build);
         if output_path.is_none() {
             warn!("Page has no URL: {:#?} … ", updated_page.to_path_string());
             continue;
         }
         let output_path = output_path.unwrap();
-        info!("Writing to {} … ", output_path);
+        info!(
+            "Writing `{}` to `{}` … ",
+            updated_page.to_path_string(),
+            output_path
+        );
         tokio::fs::create_dir_all(
             Path::new(&output_path)
                 .parent()
