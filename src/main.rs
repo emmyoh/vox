@@ -2,6 +2,7 @@ use actix_files::NamedFile;
 use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::{App, HttpServer};
 use ahash::{AHashMap, AHashSet, HashSet, HashSetExt};
+use chrono::{Locale, Utc};
 use clap::{arg, crate_version};
 use clap::{Parser, Subcommand};
 use daggy::Walker;
@@ -19,11 +20,11 @@ use std::path::Path;
 use std::sync::mpsc::channel;
 use std::{fs, path::PathBuf, time::Duration};
 use ticky::Stopwatch;
-use tokio::time::{sleep, Instant};
+use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, trace, warn, Level};
 use vox::builds::EdgeType;
-use vox::date::{self};
+use vox::date::{self, Date};
 use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 
 #[global_allocator]
@@ -253,12 +254,12 @@ fn insert_or_update_page(
     pages: &mut AHashMap<PathBuf, NodeIndex>,
     layouts: &mut AHashMap<PathBuf, HashSet<NodeIndex>>,
     collection_dependents: &mut AHashMap<String, HashSet<NodeIndex>>,
-    locale: String,
+    locale: Locale,
 ) -> miette::Result<()> {
     let entry = fs::canonicalize(entry).into_diagnostic()?;
     let (page, index) = if !Page::is_layout_path(&entry)? {
         info!("Inserting or updating page: {:?} … ", entry);
-        let page = path_to_page(entry.clone(), locale.clone())?;
+        let page = path_to_page(entry.clone(), locale)?;
         debug!("{:#?}", page);
         // If the page already exists in the DAG, update it. Otherwise, insert it.
         let index = if pages.contains_key(&entry) {
@@ -305,7 +306,7 @@ fn insert_or_update_page(
             dag.remove_node(old_layout.1);
         }
         info!("Inserting layout: {:?} … ", layout_path);
-        let layout_page = path_to_page(layout_path.clone(), locale.clone())?;
+        let layout_page = path_to_page(layout_path.clone(), locale)?;
         debug!("{:#?}", layout_page);
         let layout_index = dag.add_child(index, EdgeType::Layout, layout_page);
         if let Some(layouts) = layouts.get_mut(&layout_path) {
@@ -349,7 +350,7 @@ fn insert_or_update_page(
                 let entry = fs::canonicalize(entry.into_diagnostic()?).into_diagnostic()?;
                 if pages.get(&entry).is_none() {
                     info!("Inserting collection page: {:?} … ", entry);
-                    let collection_page = path_to_page(entry.clone(), locale.clone())?;
+                    let collection_page = path_to_page(entry.clone(), locale)?;
                     debug!("{:#?}", collection_page);
                     let collection_page_index =
                         dag.add_parent(index, EdgeType::Collection, collection_page);
@@ -395,7 +396,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
             &mut pages,
             &mut layouts,
             &mut collection_dependents,
-            global.1.clone(),
+            global.1,
         )?;
     }
     // We update the layouts with their parents and children once all other pages have been inserted.
@@ -409,7 +410,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 &mut pages,
                 &mut layouts,
                 &mut collection_dependents,
-                global.1.clone(),
+                global.1,
             )?;
         }
     }
@@ -419,7 +420,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
     let (_updated_pages, updated_dag) = generate_site(
         parser.clone(),
         global.0.clone(),
-        global.1.clone(),
+        global.1,
         dag,
         visualise_dag,
     )
@@ -447,7 +448,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
         //     .unwatch(&output_path)
         //     .into_diagnostic()?;
 
-        let mut changed_times = Vec::new();
+        // let mut changed_times = Vec::new();
         loop {
             if let Ok(events) = receiver.recv().into_diagnostic()? {
                 // Changes to the output directory or version control are irrelevant.
@@ -460,14 +461,17 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     continue;
                 }
                 debug!("Changes detected: {:#?} … ", events);
-                changed_times.push(Instant::now());
+                // changed_times.push(Instant::now());
             }
-            if changed_times.len() > 1 {
-                let first = changed_times.remove(0);
-                if first.elapsed() < Duration::from_secs(1) {
-                    continue;
-                }
-            }
+            // If changes are made, wait until a certain period (eg, one second) has elapsed where no further changes have been made.
+            // if changed_times.len() > 0 {
+            //     let last_change = changed_times.last().unwrap();
+            //     if last_change.elapsed() >= Duration::from_secs(1) {
+            //         info!("Changes stabilised. Rebuilding … ");
+            //     } else {
+            //         continue;
+            //     }
+            // }
 
             // 1. Build a new DAG.
             let parser = create_liquid_parser()?;
@@ -492,7 +496,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     &mut new_pages,
                     &mut new_layouts,
                     &mut new_collection_dependents,
-                    global.1.clone(),
+                    global.1,
                 )?;
             }
             for (layout_path, layout_indices) in new_layouts.clone() {
@@ -504,7 +508,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                         &mut new_pages,
                         &mut new_layouts,
                         &mut new_collection_dependents,
-                        global.1.clone(),
+                        global.1,
                     )?;
                 }
             }
@@ -533,20 +537,48 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 let page = new_dag.node_weight(*page_index).unwrap();
                 new_dag_pages.insert(page_path.clone(), page);
             }
-            let mut updated_pages = AHashSet::new();
-            for (page_path, new_page) in new_dag_pages {
-                if let Some(old_page) = old_dag_pages.get(&page_path) {
+            let mut added_or_modified = AHashSet::new();
+            let mut removed = AHashSet::new();
+            let mut removed_output_paths = AHashSet::new();
+            for (page_path, new_page) in new_dag_pages.iter() {
+                if let Some(old_page) = old_dag_pages.get(page_path) {
                     // If the page has been modified, its index is noted.
                     if !new_page.is_equivalent(old_page) {
-                        updated_pages.insert(new_pages[&page_path]);
+                        added_or_modified.insert(new_pages[page_path]);
                     }
                 } else {
                     // If the page is new, its index is noted.
-                    updated_pages.insert(new_pages[&page_path]);
+                    added_or_modified.insert(new_pages[page_path]);
                 }
             }
-            // No need to continue if no pages were added or changed.
-            if updated_pages.is_empty() {
+            for (page_path, _old_page) in old_dag_pages.iter() {
+                if new_dag_pages.get(page_path).is_none() {
+                    // If the page has been removed, its index is noted.
+                    removed.insert(pages[page_path]);
+                    if let Some(old_page) = old_dag_pages.get(page_path) {
+                        let output_path = if old_page.url.is_empty() {
+                            let layout_url = get_layout_url(&pages[page_path], &dag);
+                            layout_url.map(|layout_url| format!("output/{}", layout_url))
+                        } else if !old_page.url.is_empty() {
+                            Some(format!("output/{}", old_page.url))
+                        } else {
+                            None
+                        };
+                        if output_path.is_none() {
+                            warn!("Page has no URL: {:#?} … ", old_page.to_path_string());
+                            continue;
+                        }
+                        let output_path = output_path.unwrap();
+                        removed_output_paths
+                            .insert(fs::canonicalize(output_path.clone()).into_diagnostic()?);
+                    }
+                }
+            }
+            info!("Removed pages: {:#?} … ", removed_output_paths);
+            // No need to continue if nothing changed.
+            if added_or_modified.is_empty() && removed.is_empty() && removed_output_paths.is_empty()
+            {
+                info!("Nothing changed. Aborting rebuild … ");
                 continue;
             }
 
@@ -555,13 +587,42 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
             //         - Their descendants in the new DAG also need to be rendered.
             //     - All pages that were added need to be rendered.
             //         - Their descendants in the new DAG also need to be rendered.
-            //     - Nothing is done with the pages that were removed. Necessary changes are covered by the two cases above.
+            //     - All pages that were removed need their descendants in the new DAG rendered.
+            //         - Their old output also needs to be deleted.
 
-            let mut pages_to_render = updated_pages.clone();
-            for updated_page_index in updated_pages.clone() {
-                let descendants = Build::get_descendants(&new_dag, updated_page_index);
+            let mut pages_to_render = added_or_modified.clone();
+            for page_index in added_or_modified.clone() {
+                let descendants = Build::get_descendants(&new_dag, page_index);
                 for descendant in descendants {
                     pages_to_render.insert(descendant);
+                }
+            }
+            for page_index in removed.clone() {
+                let descendants = Build::get_descendants(&dag, page_index);
+                let descendant_page_paths = descendants
+                    .iter()
+                    .map(|descendant| {
+                        PathBuf::from(dag.node_weight(*descendant).unwrap().to_path_string())
+                    })
+                    .collect::<Vec<_>>();
+                for descendant_page_path in descendant_page_paths {
+                    if let Some(descendant_page_index) = new_pages.get(&descendant_page_path) {
+                        pages_to_render.insert(*descendant_page_index);
+                    }
+                }
+            }
+            // Only the root pages need to be passed to the rendering code, as it will recursively render their descendants.
+            let mut root_pages_to_render = added_or_modified.clone();
+            for page_index in removed.clone() {
+                let children = dag.children(page_index).iter(&dag).collect::<Vec<_>>();
+                let child_page_paths = children
+                    .iter()
+                    .map(|child| PathBuf::from(dag.node_weight(child.1).unwrap().to_path_string()))
+                    .collect::<Vec<_>>();
+                for child_page_path in child_page_paths {
+                    if let Some(child_page_index) = new_pages.get(&child_page_path) {
+                        root_pages_to_render.insert(*child_page_index);
+                    }
                 }
             }
 
@@ -572,12 +633,14 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 if !pages_to_render.contains(page_index) {
                     // Pages may be added, so it is necessary to check if the page already exists in the old DAG.
                     if let Some(old_page) = dag.node_weight(pages[page_path]) {
-                        let mut _new_page = new_dag.node_weight_mut(*page_index).unwrap();
-                        _new_page = &mut old_page.clone();
+                        let new_page = new_dag.node_weight_mut(*page_index).unwrap();
+                        new_page.url = old_page.url.clone();
+                        new_page.rendered = old_page.rendered.clone();
                     }
                 }
             }
             dag = new_dag;
+            trace!("Merged DAGs … ");
 
             // 5. Render & output the appropriate pages.
             info!("Rebuilding … ");
@@ -588,12 +651,20 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 locale: global.1,
                 dag,
             };
+
+            // Delete the output of removed pages.
+            for removed_output_path in removed_output_paths {
+                info!("Removing {:?} … ", removed_output_path);
+                tokio::fs::remove_file(removed_output_path)
+                    .await
+                    .into_diagnostic()?;
+            }
+
             let mut rendered_pages = Vec::new();
-            for page in updated_pages.iter() {
+            for page in root_pages_to_render.iter() {
                 build.render_recursively(*page, &mut rendered_pages)?;
             }
 
-            info!("{} pages were rendered … ", rendered_pages.len());
             for updated_page_index in rendered_pages.iter() {
                 let updated_page = &build.dag.graph()[*updated_page_index];
                 let output_path = if updated_page.url.is_empty() {
@@ -609,7 +680,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     continue;
                 }
                 let output_path = output_path.unwrap();
-                info!("Writing to {} … ", output_path);
+                info!("Writing to `{}` … ", output_path);
                 tokio::fs::create_dir_all(
                     Path::new(&output_path)
                         .parent()
@@ -624,7 +695,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
             timer.stop();
             println!(
                 "Generated {} pages in {:.2} seconds … ",
-                updated_pages.len(),
+                rendered_pages.len(),
                 timer.elapsed_s()
             );
             dag = build.dag;
@@ -664,7 +735,7 @@ fn get_layout_url(
 async fn generate_site(
     template_parser: liquid::Parser,
     contexts: liquid::Object,
-    locale: String,
+    locale: Locale,
     dag: StableDag<Page, EdgeType>,
     visualise_dag: bool,
 ) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
@@ -731,7 +802,7 @@ async fn generate_site(
     Ok((updated_pages, build.dag))
 }
 
-fn path_to_page(path: PathBuf, locale: String) -> miette::Result<Page> {
+fn path_to_page(path: PathBuf, locale: Locale) -> miette::Result<Page> {
     Page::new(
         fs::read_to_string(path.clone()).into_diagnostic()?,
         path,
@@ -739,7 +810,7 @@ fn path_to_page(path: PathBuf, locale: String) -> miette::Result<Page> {
     )
 }
 
-fn get_global_context() -> miette::Result<(Object, String)> {
+fn get_global_context() -> miette::Result<(Object, Locale)> {
     let global_context = match fs::read_to_string("global.toml") {
         Ok(global_file) => global_file.parse::<Table>().into_diagnostic()?,
         Err(_) => format!("locale = '{}'", date::default_locale_string())
@@ -752,9 +823,16 @@ fn get_global_context() -> miette::Result<(Object, String)> {
         .as_str()
         .unwrap_or(&date::default_locale_string())
         .to_string();
+    let locale = date::locale_string_to_locale(locale.clone());
+    let current_date = Date::chrono_to_date(Utc::now(), locale);
     Ok((
         object!({
-            "global": global_context
+            "global": global_context,
+            "meta": {
+                "builder": "Vox",
+                "version": crate_version!(),
+                "date": current_date,
+            }
         }),
         locale,
     ))

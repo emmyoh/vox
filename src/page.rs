@@ -1,7 +1,8 @@
 use crate::{
-    date::{locale_string_to_locale, Date},
+    date::Date,
     error::{DateNotValid, FrontmatterNotFound, InvalidCollectionsProperty},
 };
+use chrono::Locale;
 use liquid::{Object, Parser};
 use miette::IntoDiagnostic;
 use miette::NamedSource;
@@ -298,7 +299,7 @@ impl Page {
     /// # Returns
     ///
     /// An instance of a page.
-    pub fn new(contents: String, path: PathBuf, locale: String) -> miette::Result<Page> {
+    pub fn new(contents: String, path: PathBuf, locale: Locale) -> miette::Result<Page> {
         let path = fs::canonicalize(path).into_diagnostic()?;
         let (frontmatter, body) = Self::get_frontmatter_and_body(contents.clone(), path.clone())?;
         let frontmatter_data = frontmatter.parse::<Table>().into_diagnostic()?;
@@ -314,7 +315,7 @@ impl Page {
         //         src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
         //     })
         //     .into_diagnostic()?;
-        let locale = locale_string_to_locale(locale);
+        // let locale = locale_string_to_locale(locale);
         let date = if let Some(date) = frontmatter_data.get("date") {
             // if date.as_str().is_none() {
             //     return Err(DateNotFound {

@@ -1,5 +1,6 @@
 use crate::page::Page;
 use ahash::AHashMap;
+use chrono::Locale;
 use daggy::{
     petgraph::{
         dot::{Config, Dot},
@@ -25,7 +26,7 @@ pub struct Build {
     /// The Liquid contexts necessary to render templates in pages.
     pub contexts: Object,
     /// The locale information of the build, primarily used to render dates and times.
-    pub locale: String,
+    pub locale: Locale,
     /// A directed acyclic graph (DAG) populated with pages and their children.
     pub dag: StableDag<Page, EdgeType>,
 }
@@ -47,7 +48,14 @@ impl Build {
             dag_graph,
             &[Config::NodeNoLabel, Config::EdgeNoLabel],
             &|_graph, edge| format!("label = \"{:?}\"", edge.weight()),
-            &|_graph, node| format!("label = \"{}\"", node.1.to_path_string()),
+            &|_graph, node| {
+                let path = PathBuf::from(node.1.to_path_string());
+                let relative_path = path
+                    .strip_prefix(fs::canonicalize(env::current_dir().unwrap()).unwrap())
+                    .unwrap();
+                let label = relative_path.to_string_lossy().to_string();
+                format!("label = \"{}\"", label)
+            },
         );
         debug!("DAG: {:#?}", dag_graphviz);
         let mut parser = DotParser::new(&format!("{:?}", dag_graphviz));
@@ -203,20 +211,22 @@ impl Build {
                 }
                 // If the parent page is in a collection this page depends on, make note of it.
                 EdgeType::Collection => {
-                    let parent_path =
-                        fs::canonicalize(PathBuf::from(parent_page.directory.clone()))
-                            .into_diagnostic()?;
-                    let parent_path_difference = parent_path
-                        .strip_prefix(&current_directory)
-                        .into_diagnostic()?;
-                    let path_components: Vec<String> = parent_path_difference
-                        .components()
-                        .map(|c| c.as_os_str().to_string_lossy().to_string())
-                        .collect();
-                    let collection_name = path_components[0].clone();
+                    // let parent_path =
+                    //     fs::canonicalize(PathBuf::from(parent_page.directory.clone()))
+                    //         .into_diagnostic()?;
+                    let parent_path = parent_page.to_path_string();
+                    let collection_name = parent_page.get_collection_name()?.unwrap();
+                    // let parent_path_difference = parent_path
+                    //     .strip_prefix(&current_directory)
+                    //     .into_diagnostic()?;
+                    // let path_components: Vec<String> = parent_path_difference
+                    //     .components()
+                    //     .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    //     .collect();
+                    // let collection_name = path_components[0].clone();
                     info!(
                         "Parent page ({:?}) is in collection: {:?}",
-                        parent_path_difference, collection_name
+                        parent_path, collection_name
                     );
                     if collection_pages.contains_key(&collection_name) {
                         collection_pages

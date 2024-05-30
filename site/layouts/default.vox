@@ -16,7 +16,7 @@
       </main>
       <footer class="footer">
         <small>
-          &copy; {{ global.author }}
+          &copy; {{ global.author }} <time datetime="{{ meta.date.rfc_2822 }}">{{ meta.date.year }}</time>
         </small>
       </footer>
     </div>

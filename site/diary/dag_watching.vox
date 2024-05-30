@@ -7,17 +7,17 @@ permalink = "date"
 
 {% markdown %}
 
-# Notes
+## Notes
 I've been using two particular terminal invocations frequently.
 
-## Linting & formatting
+### Linting & formatting
 ```sh
 cargo fix --edition --edition-idioms --allow-dirty; cargo clippy --fix -Z unstable-options --allow-dirty; cargo fix --edition --edition-idioms --bin vox --features="cli" --allow-dirty; cargo clippy --fix -Z unstable-options --bin vox --features="cli" --allow-dirty; cargo fmt
 ```
 
 These commands lint Vox, check it for errors, and then format its code.
 
-## Installing the local copy of Vox
+### Installing the local copy of Vox
 ```sh
 cargo install --path . --features="cli"
 ```
@@ -26,7 +26,7 @@ This command allows me to use the `vox` CLI built with my latest local changes.
 
 ---
 
-# Goals
+## Goals
 
 Today, I'm concerned with:
 - Colouring pages differently when visualising the DAG; currently, the same colour is used for all pages.
@@ -35,17 +35,17 @@ Today, I'm concerned with:
 - Putting together this development diary.
 - Adding a `meta` templating context.
 
-## DAG Visualisation
+### DAG Visualisation
 Colouring should be done based on the node's label.
 To me, beige (ie, a light orange) is the colour of layouts, and a light blue complement is appropriate for collection-less pages.
 - If the page is a layout page, set its colour to beige (<img src="https://placehold.co/15x15/FFDFBA/FFDFBA.png" alt="#FFDFBA" style="margin-bottom: auto;display: inline;">).
 - If the page is a page in a collection, set its colour to light green (<img src="https://placehold.co/15x15/DAFFBA/DAFFBA.png" alt="#DAFFBA" style="margin-bottom: auto;display: inline;">).
 - If the page is a page not in a collection, set its colour to light blue (<img src="https://placehold.co/15x15/BADAFF/BADAFF.png" alt="#BADAFF" style="margin-bottom: auto;display: inline;">).
 
-## CLI Path Parameter
+### CLI Path Parameter
 The CLI should take an `Option<PathBuf>`. If this path is `None`, do nothing. Otherwise, use this path to set the current environment path.
 
-## Watching
+### Watching
 If changes are made, wait until a certain period (eg, five seconds) has elapsed where no further changes have been made.
 When such a period has elapsed, do the following:
 
@@ -65,7 +65,7 @@ When such a period has elapsed, do the following:
     - In the new DAG, replace all pages not needing rendering with their rendered counterparts from the old DAG.
 5. Render & output the appropriate pages.
 
-## Development Diary
+### Development Diary
 Maintaining a development diary is important for three primary reasons:
 1. It conveys to others that the project is being developed.
 2. It aids me in returning to the project when my attention temporarily turned away from in-progress work.
@@ -79,7 +79,7 @@ To build this development diary, I'll need to perform the following tasks:
 
 To publish this development diary, I'll use a GitHub workflow similar to the one I wrote for [`vox-basic`](https://github.com/emmyoh/vox-basic).
 
-## `meta` Context
+### `meta` Context
 The `meta` context comprises the following:
 - `meta.date`, being the current date-time of the build.
 - `meta.builder`, being the name of the software building the site ('Vox').
@@ -92,7 +92,7 @@ This makes Vox (and the abstract 'standard' it describes) very opinionated; it s
 
 ---
 
-# Future Goals
+## Future Goals
 
 In the future, this tool needs:
 1. A blog pertaining to the project, very similar in appearance to the development diary, but different in scope.

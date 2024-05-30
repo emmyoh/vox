@@ -26,7 +26,7 @@ When changes are made, rebuilding can be done selectively:
         - Their descendants in the new DAG also need to be rendered.
     - All pages that were added need to be rendered.
         - Their descendants in the new DAG also need to be rendered.
-    - All pages that were removed need their descendants in the old DAG rendered.
+    - All pages that were removed need their descendants in the new DAG rendered.
 4. The DAGs are merged.
     - In the new DAG, all pages not needing rendering are replaced with their rendered counterparts from the old DAG.
 5. Pages are rendered.
