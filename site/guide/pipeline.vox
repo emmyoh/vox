@@ -9,9 +9,9 @@ permalink = "none"
 Vox's rendering pipeline centres around the [directed acyclic graph (DAG)](https://en.wikipedia.org/wiki/Directed_acyclic_graph) data structure.
 Builds begin with constructing a DAG where the children of pages are their layouts (a layout appearing in the DAG as often as it was used), and the parents of non-layout pages are the pages in the collections they depend on.
 As an illustrative example, the DAG of this site looks like the following:
-
-<object id="dag" data="http://localhost:80/dag.svg" style="overflow: scroll;max-height: 6rem;"></object>
-
+{% endmarkdown %}
+<object id="dag" data="{{ global.url | append: "/dag.svg" }}" style="overflow: scroll;max-height: 6rem;"></object>
+{% markdown %}
 Then, pages are rendered recursively, with every root page (ie, every page without any parents) having its descendants rendered.
 
 When changes are made, rebuilding can be done selectively:
