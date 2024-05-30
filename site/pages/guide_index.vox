@@ -1,0 +1,7 @@
+---
+layout = "default"
+collections = ["guide"]
+permalink = "guide/index.html"
+---
+{% assign posts = guide | sort: "guide.date" %}
+{% include index.voxs posts = posts minimal = true %}

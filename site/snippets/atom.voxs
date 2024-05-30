@@ -13,7 +13,9 @@
  <entry>
    <title>{{ post.data.title | escape }}</title>
    <link href="{{ post.url | escape | prepend: global.url }}"/>
+   {% if post.date %}
    <updated>{{ post.date.rfc_2822 }}</updated>
+   {% endif %}
    <id>{{ post.url | escape }}</id>
    <content type="html">{{ post.rendered | escape }}</content>
  </entry>
