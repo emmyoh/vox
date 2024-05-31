@@ -3,5 +3,5 @@ layout = "default"
 collections = ["guide"]
 permalink = "guide/index.html"
 ---
-{% assign posts = guide | sort: "guide.data.title" | reverse %}
+{% assign posts = guide | sort: "data.title" | reverse %}
 {% include index.voxs posts = posts minimal = true %}
