@@ -1,8 +1,9 @@
 use crate::page::Page;
-use ahash::{AHashMap, AHashSet};
+use ahash::AHashMap;
 use chrono::Locale;
 use daggy::{
     petgraph::{
+        algo::toposort,
         dot::{Config, Dot},
         Direction,
     },
@@ -174,45 +175,50 @@ impl Build {
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<AHashSet<NodeIndex>> {
+    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<Vec<NodeIndex>> {
         info!("Rendering all pages … ");
         if visualise_dag {
             self.visualise_dag()?;
         }
-        let mut rendered_indices = AHashSet::new();
-        let root_indices = self.find_root_indices();
-        debug!("Root indices: {:?}", root_indices);
-        for root_index in root_indices {
-            self.render_recursively(root_index, &mut rendered_indices)?;
+        let mut rendered_indices = Vec::new();
+        // let root_indices = self.find_root_indices();
+        // debug!("Root indices: {:?}", root_indices);
+        // info!(
+        //     "Rendering root pages: {:#?} … ",
+        //     root_indices
+        //         .iter()
+        //         .map(|index| self.dag.graph()[*index].to_path_string())
+        //         .collect::<Vec<_>>()
+        // );
+        // for root_index in root_indices {
+        //     self.render_recursively(root_index, &mut rendered_indices)?;
+        // }
+        let indices = toposort(&self.dag.graph(), None).unwrap_or_default();
+        for index in indices {
+            self.render_page(index, false, &mut rendered_indices)?;
         }
         Ok(rendered_indices)
     }
 
-    /// Render a page and its descendant pages.
+    /// Render a page.
     ///
     /// # Arguments
     ///
     /// * `root_index` - The index of the page in the DAG.
+    ///
+    /// * `recursive` - Whether to render descendants of the page.
     ///
     /// * `rendered_indices` - A list of all nodes that have already been rendered.
     ///
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_recursively(
+    pub fn render_page(
         &mut self,
         root_index: NodeIndex,
-        rendered_indices: &mut AHashSet<NodeIndex>,
+        recursive: bool,
+        rendered_indices: &mut Vec<NodeIndex>,
     ) -> miette::Result<()> {
-        // // If the page has already been rendered, return early to avoid rendering it again.
-        // // Since a page can be a child of multiple pages, a render call can be made multiple times.
-        // if rendered_indices.contains(&root_index) {
-        //     debug!(
-        //         "Page already rendered: `{}`. Skipping … ",
-        //         self.dag.graph()[root_index].to_path_string()
-        //     );
-        //     // return Ok(());
-        // }
         let current_directory =
             fs::canonicalize(env::current_dir().into_diagnostic()?).into_diagnostic()?;
         let root_page = self.dag.graph()[root_index].to_owned();
@@ -241,7 +247,6 @@ impl Build {
             .iter(&self.dag)
             .collect::<Vec<_>>();
         debug!("Parents: {:?}", parents);
-        // while let Some(parent) = self.dag.parents(root_index).walk_next(&self.dag) {
         for parent in parents {
             let parent_page = &self.dag.graph()[parent.1];
             let edge = self.dag.edge_weight(parent.0).unwrap();
@@ -260,19 +265,8 @@ impl Build {
                 }
                 // If the parent page is in a collection this page depends on, make note of it.
                 EdgeType::Collection => {
-                    // let parent_path =
-                    //     fs::canonicalize(PathBuf::from(parent_page.directory.clone()))
-                    //         .into_diagnostic()?;
                     let parent_path = parent_page.to_path_string();
                     let collection_name = parent_page.get_collection_name()?.unwrap();
-                    // let parent_path_difference = parent_path
-                    //     .strip_prefix(&current_directory)
-                    //     .into_diagnostic()?;
-                    // let path_components: Vec<String> = parent_path_difference
-                    //     .components()
-                    //     .map(|c| c.as_os_str().to_string_lossy().to_string())
-                    //     .collect();
-                    // let collection_name = path_components[0].clone();
                     info!(
                         "Parent page ({:?}) is in collection: {:?}",
                         parent_path, collection_name
@@ -301,7 +295,6 @@ impl Build {
                 .collect();
             debug!("`{}` pages: {:#?}", collection_name, collection_pages);
             let collection_object = to_value(&collection_pages).into_diagnostic()?;
-            // liquid_core::Value::Array(to_object(&collection_pages).into_diagnostic()?);
             root_contexts.insert(collection_name.clone().into(), collection_object.clone());
         }
         debug!(
@@ -311,7 +304,7 @@ impl Build {
         );
         let root_page = self.dag.node_weight_mut(root_index).unwrap();
         if root_page.render(&root_contexts, &self.template_parser)? {
-            rendered_indices.insert(root_index);
+            rendered_indices.push(root_index);
             debug!(
                 "After rendering `{}`: {:#?}",
                 root_page.to_path_string(),
@@ -319,109 +312,18 @@ impl Build {
             );
         }
 
-        let children = self
-            .dag
-            .children(root_index)
-            .iter(&self.dag)
-            .collect::<Vec<_>>();
-        debug!("Children: {:?}", children);
-        // while let Some(child) = self.dag.children(root_index).walk_next(&self.dag) {
-        for child in children {
-            // let child_contexts = self.contexts.clone();
-            // let child_page = &self.dag.graph()[child.1];
-            // let child_path = fs::canonicalize(PathBuf::from(child_page.directory.clone())).into_diagnostic()?;
-            // let child_path_difference = child_path.strip_prefix(&current_directory).into_diagnostic()?;
-            // // If the child page is a layout page, its context is called `layout`.
-            // // All other pages have their contexts named `page`.
-            // if child_path_difference.starts_with(PathBuf::from("layout")) {
-            //     let layout_object = liquid_core::Value::Object(to_object(&child_page).into_diagnostic()?);
-            //     child_contexts.insert("layout".into(), layout_object.clone());
-            // } else {
-            //     let page_object = liquid_core::Value::Object(to_object(&child_page).into_diagnostic()?);
-            //     child_contexts.insert("page".into(), page_object.clone());
-            // }
-            // // let mut parent_pages: AHashMap<NodeIndex, Page> = AHashMap::new();
-            // let mut collection_pages: AHashMap<String, Vec<NodeIndex>> = AHashMap::new();
-            // // Find all parent pages of the child page.
-            // while let Some(parent) = self.dag.parents(child.1).walk_next(&self.dag) {
-            //     let parent_page = &self.dag.graph()[parent.1];
-            //     let edge = self.dag.edge_weight(parent.0).unwrap();
-            //     match edge {
-            //         // If the parent page is using this page as a layout, add its context as `page`.
-            //         EdgeType::Layout => {
-            //             let parent_object = liquid_core::Value::Object(to_object(&parent_page).into_diagnostic()?);
-            //             child_contexts.insert("page".into(), parent_object.clone());
-            //         }
-            //         // If the parent page is in a collection this page depends on, make note of it.
-            //         EdgeType::Collection => {
-            //             let parent_path =
-            //                 fs::canonicalize(PathBuf::from(parent_page.directory.clone())).into_diagnostic()?;
-            //             let parent_path_difference =
-            //                 parent_path.strip_prefix(&current_directory).into_diagnostic()?;
-            //             let path_components: Vec<String> = parent_path_difference
-            //                 .components()
-            //                 .map(|c| c.as_os_str().to_string_lossy().to_string())
-            //                 .collect();
-            //             let collection_name = path_components[0].clone();
-            //             if collection_pages.contains_key(&collection_name) {
-            //                 collection_pages
-            //                     .get_mut(&collection_name)
-            //                     .unwrap()
-            //                     .push(parent.1);
-            //             } else {
-            //                 collection_pages.insert(collection_name.clone(), vec![parent.1]);
-            //             }
-            //         }
-            //     }
-            //     // parent_pages.insert(parent.1, parent_page.clone());
-            // }
-            // // for (parent_index, parent_page) in parent_pages.iter_mut() {
-            // //     let parent_path = fs::canonicalize(PathBuf::from(parent_page.directory.clone())).into_diagnostic()?;
-            // //     let path_difference =
-            // //         parent_path.strip_prefix(fs::canonicalize(env::current_dir().into_diagnostic()?).into_diagnostic()?).into_diagnostic()?;
-            // //     // If the parent page is a layout page, render it and add it to the child's contexts.
-            // //     // if path_difference.starts_with(PathBuf::from("layout")) {
-            // //     //     let layout_object = {
-            // //     //         let layout_page = self.dag.node_weight_mut(*parent_index).unwrap();
-            // //     //         if layout_page.render(&contexts, &self.template_parser).into_diagnostic()? {
-            // //     //             rendered_indices.push(*parent_index);
-            // //     //         }
-            // //     //         liquid_core::Value::Object(to_object(&parent_page).into_diagnostic()?)
-            // //     //     };
-            // //     //     child_contexts.insert("layout".into(), layout_object.clone());
-            // //     // } else {
-            // //         // If the parent page is a collection page, make note of it.
-            // //         let path_components: Vec<String> = path_difference
-            // //             .components()
-            // //             .map(|c| c.as_os_str().to_string_lossy().to_string())
-            // //             .collect();
-            // //         let collection_name = path_components[0].clone();
-            // //         if collection_pages.contains_key(&collection_name) {
-            // //             collection_pages
-            // //                 .get_mut(&collection_name)
-            // //                 .unwrap()
-            // //                 .push(*parent_index);
-            // //         } else {
-            // //             collection_pages.insert(collection_name.clone(), vec![*parent_index]);
-            // //         }
-            // //     // }
-            // // }
-            // // Add the collection pages to the child's contexts.
-            // for (collection_name, collection) in collection_pages.iter_mut() {
-            //     // let mut collection_pages = Vec::new();
-            //     let collection_pages: Vec<Page> = collection
-            //         .iter()
-            //         .map(|page_index| self.dag.node_weight_mut(*page_index).unwrap().to_owned())
-            //         .collect();
-            //     // for page_index in collection.iter() {
-            //     //     let collection_page = self.dag.node_weight_mut(*page_index).unwrap();
-            //     //     collection_pages.push(collection_page.clone());
-            //     // }
-            //     let collection_object = liquid_core::Value::Object(to_object(&collection_pages).into_diagnostic()?);
-            //     child_contexts.insert(collection_name.clone().into(), collection_object.clone());
-            // }
-            self.render_recursively(child.1, rendered_indices)?;
+        if recursive {
+            let children = self
+                .dag
+                .children(root_index)
+                .iter(&self.dag)
+                .collect::<Vec<_>>();
+            debug!("Children: {:?}", children);
+            for child in children {
+                self.render_page(child.1, recursive, rendered_indices)?;
+            }
         }
+
         Ok(())
     }
 

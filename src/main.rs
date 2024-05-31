@@ -5,6 +5,7 @@ use ahash::{AHashMap, AHashSet, HashSet, HashSetExt};
 use chrono::{Locale, Utc};
 use clap::{arg, crate_version};
 use clap::{Parser, Subcommand};
+use daggy::petgraph::algo::toposort;
 use daggy::Walker;
 use daggy::{stable_dag::StableDag, NodeIndex};
 use glob::glob;
@@ -661,7 +662,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 }
             }
             // Only the root pages need to be passed to the rendering code, as it will recursively render their descendants.
-            let mut root_pages_to_render = added_or_modified.clone();
+            // let mut root_pages_to_render = added_or_modified.clone();
             for page_index in removed.clone() {
                 let children = dag.children(page_index).iter(&dag).collect::<Vec<_>>();
                 let child_page_paths = children
@@ -670,7 +671,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     .collect::<Vec<_>>();
                 for child_page_path in child_page_paths {
                     if let Some(child_page_index) = new_pages.get(&child_page_path) {
-                        root_pages_to_render.insert(*child_page_index);
+                        pages_to_render.insert(*child_page_index);
                     }
                 }
             }
@@ -712,16 +713,12 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     .into_diagnostic()?;
             }
 
-            let mut rendered_pages = AHashSet::new();
-            info!(
-                "Rendering root pages: {:#?} … ",
-                root_pages_to_render
-                    .iter()
-                    .map(|index| build.dag.graph()[*index].to_path_string())
-                    .collect::<Vec<_>>()
-            );
-            for page in root_pages_to_render.iter() {
-                build.render_recursively(*page, &mut rendered_pages)?;
+            let mut rendered_pages = Vec::new();
+            let render_order = toposort(&build.dag.graph(), None).unwrap_or_default();
+            for page in render_order {
+                if pages_to_render.contains(&page) {
+                    build.render_page(page, false, &mut rendered_pages)?;
+                }
             }
 
             for updated_page_index in rendered_pages.iter() {
@@ -808,7 +805,7 @@ async fn generate_site(
     locale: Locale,
     dag: StableDag<Page, EdgeType>,
     visualise_dag: bool,
-) -> miette::Result<(AHashSet<NodeIndex>, StableDag<Page, EdgeType>)> {
+) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
     let mut timer = Stopwatch::start_new();
     let mut build = Build {
         template_parser,
