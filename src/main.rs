@@ -26,6 +26,7 @@ use toml::Table;
 use tracing::{debug, error, info, trace, warn, Level};
 use vox::builds::EdgeType;
 use vox::date::{self, Date};
+use vox::templates;
 use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 
 #[global_allocator]
@@ -53,6 +54,9 @@ enum Commands {
         /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
+        /// Generate stylesheet for syntax highlighting.
+        #[arg(short = 's', long, default_value_t = false)]
+        generate_syntax_css: bool,
     },
     /// Serve the site.
     Serve {
@@ -71,6 +75,9 @@ enum Commands {
         /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
+        /// Generate stylesheet for syntax highlighting.
+        #[arg(short = 's', long, default_value_t = false)]
+        generate_syntax_css: bool,
     },
 }
 
@@ -95,6 +102,7 @@ async fn main() -> miette::Result<()> {
             watch,
             verbosity,
             visualise_dag,
+            generate_syntax_css,
         }) => {
             if let Some(path) = path {
                 std::env::set_current_dir(path).into_diagnostic()?;
@@ -121,7 +129,7 @@ async fn main() -> miette::Result<()> {
             info!("Building … ");
             let build_loop = tokio::spawn(async move {
                 loop {
-                    let building = tokio::spawn(build(watch, visualise_dag));
+                    let building = tokio::spawn(build(watch, visualise_dag, generate_syntax_css));
                     match building.await {
                         Ok(_) => {
                             if !watch {
@@ -145,6 +153,7 @@ async fn main() -> miette::Result<()> {
             port,
             verbosity,
             visualise_dag,
+            generate_syntax_css,
         }) => {
             if let Some(path) = path {
                 std::env::set_current_dir(path).into_diagnostic()?;
@@ -170,7 +179,7 @@ async fn main() -> miette::Result<()> {
             subscriber_builder.init();
             let build_loop = tokio::spawn(async move {
                 loop {
-                    let building = tokio::spawn(build(watch, visualise_dag));
+                    let building = tokio::spawn(build(watch, visualise_dag, generate_syntax_css));
                     match building.await {
                         Ok(_) => {
                             if !watch {
@@ -373,7 +382,7 @@ fn insert_or_update_page(
     Ok(())
 }
 
-async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
+async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette::Result<()> {
     let parser = create_liquid_parser()?;
     let global = get_global_context()?;
     let mut dag = StableDag::new();
@@ -424,6 +433,7 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
         global.1,
         dag,
         visualise_dag,
+        generate_syntax_css,
     )
     .await?;
     dag = updated_dag;
@@ -684,8 +694,10 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                     // Pages may be added, so it is necessary to check if the page already exists in the old DAG.
                     if let Some(old_page) = dag.node_weight(pages[page_path]) {
                         let new_page = new_dag.node_weight_mut(*page_index).unwrap();
-                        new_page.url = old_page.url.clone();
-                        new_page.rendered = old_page.rendered.clone();
+                        // new_page.url = old_page.url.clone();
+                        // new_page.rendered = old_page.rendered.clone();
+                        new_page.url.clone_from(&old_page.url);
+                        new_page.rendered.clone_from(&old_page.rendered);
                     }
                 }
             }
@@ -744,6 +756,9 @@ async fn build(watch: bool, visualise_dag: bool) -> miette::Result<()> {
                 tokio::fs::write(output_path, updated_page.rendered.clone())
                     .await
                     .into_diagnostic()?;
+            }
+            if generate_syntax_css {
+                templates::generate_syntax_css()?;
             }
             timer.stop();
             println!(
@@ -805,6 +820,7 @@ async fn generate_site(
     locale: Locale,
     dag: StableDag<Page, EdgeType>,
     visualise_dag: bool,
+    generate_syntax_css: bool,
 ) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
     let mut timer = Stopwatch::start_new();
     let mut build = Build {
@@ -840,6 +856,9 @@ async fn generate_site(
         tokio::fs::write(output_path, updated_page.rendered.clone())
             .await
             .into_diagnostic()?;
+    }
+    if generate_syntax_css {
+        templates::generate_syntax_css()?;
     }
     timer.stop();
     println!(

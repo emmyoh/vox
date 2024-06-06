@@ -4,6 +4,7 @@ use std::{
     borrow::Cow,
     path::{Path, PathBuf},
 };
+use syntect::{highlighting::ThemeSet, html::css_for_theme};
 
 use crate::{markdown_block::MarkdownBlock, math_block::MathBlock};
 
@@ -27,18 +28,18 @@ impl SnippetSource {
     pub fn update_list(&mut self) {
         self.names.clear();
         if let Ok(snippets_directory) = std::fs::read_dir("snippets") {
-            for entry in snippets_directory {
-                if let Ok(entry) = entry {
-                    if entry.file_type().unwrap().is_file() {
-                        let name = entry
-                            .path()
-                            .file_name()
-                            .unwrap()
-                            .to_string_lossy()
-                            .to_string();
-                        self.names.push(name);
-                    }
+            for entry in snippets_directory.flatten() {
+                // if let Ok(entry) = entry {
+                if entry.file_type().unwrap().is_file() {
+                    let name = entry
+                        .path()
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string();
+                    self.names.push(name);
                 }
+                // }
             }
         }
     }
@@ -95,4 +96,26 @@ pub fn create_liquid_parser() -> miette::Result<liquid::Parser> {
         .partials(partial_compiler)
         .build()
         .into_diagnostic()
+}
+
+/// Generate stylesheets for syntax highlighting.
+pub fn generate_syntax_css() -> miette::Result<()> {
+    let css_path = PathBuf::from("output/css/");
+    let dark_css_path = css_path.join("dark-code.css");
+    let light_css_path = css_path.join("light-code.css");
+    let code_css_path = css_path.join("code.css");
+    std::fs::create_dir_all(css_path).into_diagnostic()?;
+
+    let ts = ThemeSet::load_defaults();
+    let dark_theme = &ts.themes["base16-ocean.dark"];
+    let css_dark = css_for_theme(dark_theme);
+    std::fs::write(dark_css_path, css_dark).into_diagnostic()?;
+
+    let light_theme = &ts.themes["base16-ocean.light"];
+    let css_light = css_for_theme(light_theme);
+    std::fs::write(light_css_path, css_light).into_diagnostic()?;
+
+    let css = r#"@import url("light-code.css") (prefers-color-scheme: light);@import url("dark-code.css") (prefers-color-scheme: dark);"#;
+    std::fs::write(code_css_path, css).into_diagnostic()?;
+    Ok(())
 }

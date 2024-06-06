@@ -170,6 +170,42 @@ impl Build {
         Ok(ancestors)
     }
 
+    /// Insert the contexts of all ancestors of a layout page.
+    /// Intended to be used when rendering a layout page.
+    ///
+    /// # Arguments
+    ///
+    /// * `root_index` - The index of the layout page in the DAG.
+    ///
+    /// * `root_contexts` - The contexts of the layout page.
+    pub fn insert_layout_ancestor_contexts(
+        &self,
+        root_index: NodeIndex,
+        root_contexts: &mut Object,
+    ) -> miette::Result<()> {
+        let mut layout_ancestor_contexts = Vec::new();
+        let ancestors = Build::get_ancestors(&self.dag, root_index);
+        for ancestor in ancestors {
+            let ancestor_page = &self.dag.graph()[ancestor];
+            let ancestor_object =
+                liquid_core::Value::Object(to_object(&ancestor_page).into_diagnostic()?);
+            if ancestor_page.is_layout()? {
+                let ancestor_object =
+                    liquid_core::Value::Object(to_object(&ancestor_page).into_diagnostic()?);
+                layout_ancestor_contexts.push(ancestor_object);
+            } else {
+                layout_ancestor_contexts.push(ancestor_object.clone());
+                root_contexts.insert("page".into(), ancestor_object.clone());
+                break;
+            }
+        }
+        root_contexts.insert(
+            "layouts".into(),
+            liquid_core::Value::Array(layout_ancestor_contexts.clone()),
+        );
+        Ok(())
+    }
+
     /// Render all pages in the DAG.
     ///
     /// # Returns
@@ -234,6 +270,7 @@ impl Build {
             let layout_object =
                 liquid_core::Value::Object(to_object(&root_page).into_diagnostic()?);
             root_contexts.insert("layout".into(), layout_object.clone());
+            self.insert_layout_ancestor_contexts(root_index, &mut root_contexts)?;
         } else {
             trace!("Page is not a layout page … ");
             let page_object = liquid_core::Value::Object(to_object(&root_page).into_diagnostic()?);
@@ -251,17 +288,17 @@ impl Build {
             let parent_page = &self.dag.graph()[parent.1];
             let edge = self.dag.edge_weight(parent.0).unwrap();
             match edge {
-                // If the parent page is using this page as a layout, add its context as `page`.
+                // // If the parent page is using this page as a layout, add its context as `page`.
                 EdgeType::Layout => {
-                    info!(
-                        "Page (`{}`) is a layout page (of `{}`) … ",
-                        root_page.to_path_string(),
-                        parent_page.to_path_string()
-                    );
-                    debug!("{:#?}", parent_page);
-                    let parent_object =
-                        liquid_core::Value::Object(to_object(&parent_page).into_diagnostic()?);
-                    root_contexts.insert("page".into(), parent_object.clone());
+                    // info!(
+                    //     "Page (`{}`) is a layout page (of `{}`) … ",
+                    //     root_page.to_path_string(),
+                    //     parent_page.to_path_string()
+                    // );
+                    // debug!("{:#?}", parent_page);
+                    // let parent_object =
+                    //     liquid_core::Value::Object(to_object(&parent_page).into_diagnostic()?);
+                    // root_contexts.insert("page".into(), parent_object.clone());
                 }
                 // If the parent page is in a collection this page depends on, make note of it.
                 EdgeType::Collection => {

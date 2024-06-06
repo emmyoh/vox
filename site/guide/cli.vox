@@ -18,6 +18,7 @@ This command takes the following options:
     - `-vvv`: debugging messages
     - `-vvvv`: trace logs
 * `-d` or `--visualise-dag`: will output a visualisation of the DAG to `dag.svg`.
+* `-s` or `--generate-syntax-css`: will output a stylesheet for code highlighting `css/code.css`.
 
 ### Example
 
@@ -30,7 +31,7 @@ vox build -w -d -vvvv
 
 When `vox serve` is invoked, the site is first built, then served locally.\
 This command takes the same arguments and flags as `vox build`, as well as the following additional options:
-* `-p &lt;PORT&gt;` or `--port &lt;PORT&gt;`: the port to serve on (defaults to `80`).
+* `-p <PORT>;` or `--port <PORT>`: the port to serve on (defaults to `80`).
 
 ### Example
 
