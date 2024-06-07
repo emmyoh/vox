@@ -1,5 +1,5 @@
 ---
-collections = ["blog"]
+depends = ["blog"]
 permalink = "blog/atom.xml"
 ---
 {% include atom.voxs posts = blog %}

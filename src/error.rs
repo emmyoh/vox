@@ -61,11 +61,13 @@ pub struct DateNotValid {
 #[diagnostic(
     code(page::invalid_collections_property),
     url(docsrs),
-    help("Please ensure that your `collections` property is a list of collections this page depends on.")
+    help(
+        "Please ensure that your `depends` property is a list of collections this page depends on."
+    )
 )]
 /// Invalid list of dependent collections.
-pub struct InvalidCollectionsProperty {
+pub struct InvalidDependsProperty {
     #[source_code]
-    /// The page with the invalid `collections` property.
+    /// The page with the invalid `depends` property.
     pub src: NamedSource<String>,
 }

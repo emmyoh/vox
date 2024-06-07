@@ -42,11 +42,11 @@ There are a variety of shorthand options for the `permalink` field:
 
 | Shorthand  | Expanded                                                                                                                 |
 |------------|--------------------------------------------------------------------------------------------------------------------------|
-| `date`     | `/{{ page.collection }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}.html`       |
-| `pretty`   | `/{{ page.collection }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}/index.html` |
-| `ordinal`  | `/{{ page.collection }}/{{ page.date.year }}/{{ page.date.y_day }}/{{ page.data.title }}.html`                           |
-| `weekdate` | `/{{ page.collection }}/{{ page.date.year }}/W{{ page.date.week }}/{{ page.date.short_day }}/{{ page.data.title }}.html` |
-| `none`     | `/{{ page.collection }}/{{ page.data.title }}.html`                                                                      |
+| `date`     | `{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}.html`       |
+| `pretty`   | `{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}/index.html` |
+| `ordinal`  | `{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.y_day }}/{{ page.data.title }}.html`                           |
+| `weekdate` | `{{ page.collections.last }}/{{ page.date.year }}/W{{ page.date.week }}/{{ page.date.short_day }}/{{ page.data.title }}.html` |
+| `none`     | `{{ page.collections.last }}/{{ page.data.title }}.html`                                                                      |
 
 {% endraw %}
 
@@ -58,13 +58,17 @@ Suppose you're trying to build an index page for your blog. Its frontmatter will
 ```toml
 ---
 layout = "default"
-collections = ["posts"]
+depends = ["posts"]
 permalink = "index.html"
 ---
 ```
 {% endraw %}
 
-The `collections` property indicates the page collections that this page depends on. A templating context is provided for each requested collection; in this example, there will be a `posts` context containing all pages in the `posts` collection.
+The `depends` property indicates the page collections that this page depends on. A templating context is provided for each requested collection; in this example, there will be a `posts` context containing all pages in the `posts` collection.
+
+The collections a page is in is defined by a page's path, with one collection per path component, and collections including each successive path component as well. For example:
+* `books/fantasy/page.vox` is in `books`, `fantasy`, and `books_fantasy`.
+* `movies/fantasy/page.vox` is in `movies`, `fantasy`, and `movies_fantasy`.
 
 ## Data
 All other fields fall under a page's `data` property.

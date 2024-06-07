@@ -1,6 +1,6 @@
 ---
 layout = "default"
-collections = ["guide"]
+depends = ["guide"]
 permalink = "guide/index.html"
 ---
 {% assign posts = guide | sort: "data.title" | reverse %}

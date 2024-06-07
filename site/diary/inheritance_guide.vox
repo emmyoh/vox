@@ -11,7 +11,7 @@ permalink = "date"
 
 This site is used to debug changes to Vox. First, the `global.url` of the site is changed, then this command is used to rebuild & serve:
 ```sh
-clear; rm -rf ./output; ./prebuild.sh; vox serve -d -w -vv
+clear; rm -rf ./output; ./prebuild.sh; vox serve -d -s -w -vv
 ```
 
 ---
@@ -23,7 +23,7 @@ Today's agenda:
 - Implementing partial date-times.
 - Redesigning layout inheritance.
     - In layout inheritance, the lowest layout should include chained parent contexts up to the first non-layout page.
-- Fixing the `{% raw %}{{ markdown }}{% endraw %}` block.
+- Fixing the `{% raw %}{% markdown %}{% endraw %}` block.
 - Finishing the user guide.
 - Modifying code according to lints.
 - Improving syntax highlighting.

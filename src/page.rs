@@ -1,6 +1,6 @@
 use crate::{
     date::Date,
-    error::{DateNotValid, FrontmatterNotFound, InvalidCollectionsProperty},
+    error::{DateNotValid, FrontmatterNotFound, InvalidDependsProperty},
 };
 use chrono::Locale;
 use liquid::{Object, Parser};
@@ -27,9 +27,13 @@ pub struct Page {
     /// A page's date-time metadata, formatted per the RFC 3339 standard.
     /// This is defined in a page's frontmatter.
     pub date: Option<Date>,
+    /// The collections a page belongs to.
+    /// This is defined by a page's path, with one collection per path component, and collections including each successive path component as well.
+    /// Example: `books/fantasy/page.vox` is in `books`, `fantasy`, and `books_fantasy`.
+    pub collections: Option<Vec<String>>,
     /// The collections a page depends on.
     /// This is defined in a page's frontmatter.
-    pub collections: Option<Vec<String>>,
+    pub depends: Option<Vec<String>>,
     /// The layout a page uses.
     /// This is defined in a page's frontmatter.
     pub layout: Option<String>,
@@ -37,8 +41,6 @@ pub struct Page {
     pub directory: String,
     /// The page's base filename.
     pub name: String,
-    /// The collection a page belongs to.
-    pub collection: Option<String>,
     /// Whether or not a page is a layout.
     pub is_layout: bool,
     /// The output path of a file; a processed `permalink` value.
@@ -73,7 +75,7 @@ impl Page {
         Ok(path_difference.starts_with("layouts/"))
     }
 
-    /// Get the name of the collection a page belongs to based on its path.
+    /// Get the names of the collections a page belongs to based on its path.
     ///
     /// # Arguments
     ///
@@ -81,10 +83,10 @@ impl Page {
     ///
     /// # Returns
     ///
-    /// The name of the collection a page belongs to, or `None` if the page does not belong to a collection.
-    pub fn get_collection_name_from_path<P: AsRef<Path>>(
+    /// The names of the collections a page belongs to, or `None` if the page does not belong to a collection.
+    pub fn get_collections_from_path<P: AsRef<Path>>(
         path: P,
-    ) -> miette::Result<Option<String>> {
+    ) -> miette::Result<Option<Vec<String>>> {
         let current_directory =
             fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
         let page_path = fs::canonicalize(path).into_diagnostic()?;
@@ -102,7 +104,23 @@ impl Page {
         if Path::new(first_path_component.as_str()).is_file() {
             return Ok(None);
         }
-        Ok(Some(first_path_component))
+        let mut results = Vec::new();
+        let mut path_builder = Vec::new();
+        for path_component in path_components {
+            if Path::new(&path_builder.join("/"))
+                .join(&path_component)
+                .is_file()
+            {
+                break;
+            }
+            results.push(path_component.clone());
+            path_builder.push(path_component.clone());
+            let current_path = path_builder.join("_");
+            if path_component != current_path {
+                results.push(path_builder.join("_"))
+            }
+        }
+        Ok(Some(results))
     }
 
     /// Determine if two pages are equivalent despite their rendered content.
@@ -122,10 +140,10 @@ impl Page {
             && lhs.permalink == rhs.permalink
             && lhs.date == rhs.date
             && lhs.collections == rhs.collections
+            && lhs.depends == rhs.depends
             && lhs.layout == rhs.layout
             && lhs.directory == rhs.directory
             && lhs.name == rhs.name
-            && lhs.collection == rhs.collection
             && lhs.is_layout == rhs.is_layout
     }
 
@@ -158,12 +176,12 @@ impl Page {
         Page::is_layout_path(self.to_path_string())
     }
 
-    /// Get the name of the collection a page belongs to.
+    /// Get the names of the collections a page belongs to.
     ///
     /// # Returns
     ///
-    /// The name of the collection a page belongs to, or `None` if the page does not belong to a collection.
-    pub fn get_collection_name(&self) -> miette::Result<Option<String>> {
+    /// The names of the collections a page belongs to, or `None` if the page does not belong to a collection.
+    pub fn get_collections(&self) -> miette::Result<Option<Vec<String>>> {
         // let current_directory =
         //     fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
         // let page_path = fs::canonicalize(self.to_path_string()).into_diagnostic()?;
@@ -175,7 +193,7 @@ impl Page {
         //     .map(|c| c.as_os_str().to_string_lossy().to_string())
         //     .collect();
         // Ok(Some(path_components[0].clone()))
-        Page::get_collection_name_from_path(self.to_path_string())
+        Page::get_collections_from_path(self.to_path_string())
     }
 
     /// Renders a page's content and URL.
@@ -217,20 +235,20 @@ impl Page {
     pub fn render_url(&mut self, contexts: &Object, parser: &Parser) -> miette::Result<bool> {
         let expanded_permalink = match self.permalink.as_str() {
             "date" => {
-                "/{{ page.collection }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}.html".to_owned()
+                "{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}.html".to_owned()
             }
             "pretty" => {
-                "/{{ page.collection }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}/index.html".to_owned()
+                "{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.month }}/{{ page.date.day }}/{{ page.data.title }}/index.html".to_owned()
             }
             "ordinal" => {
-                "/{{ page.collection }}/{{ page.date.year }}/{{ page.date.y_day }}/{{ page.data.title }}.html"
+                "{{ page.collections.last }}/{{ page.date.year }}/{{ page.date.y_day }}/{{ page.data.title }}.html"
                     .to_owned()
             }
             "weekdate" => {
-                "/{{ page.collection }}/{{ page.date.year }}/W{{ page.date.week }}/{{ page.date.short_day }}/{{ page.data.title }}.html".to_owned()
+                "{{ page.collections.last }}/{{ page.date.year }}/W{{ page.date.week }}/{{ page.date.short_day }}/{{ page.data.title }}.html".to_owned()
             }
             "none" => {
-                "/{{ page.collection }}/{{ page.data.title }}.html".to_owned()
+                "{{ page.collections.last }}/{{ page.data.title }}.html".to_owned()
             }
             _ => {
                 self.permalink.to_owned()
@@ -339,18 +357,18 @@ impl Page {
         let permalink = frontmatter_data_clone
             .get("permalink")
             .map(|p| p.as_str().unwrap().to_string());
-        let collections = match frontmatter_data_clone.get("collections") {
-            Some(collections) => Some(
-                collections
+        let depends = match frontmatter_data_clone.get("depends") {
+            Some(depends) => Some(
+                depends
                     .as_array()
-                    .ok_or(InvalidCollectionsProperty {
+                    .ok_or(InvalidDependsProperty {
                         src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
                     })
                     .into_diagnostic()?
                     .iter()
                     .map(|x| {
                         x.as_str()
-                            .ok_or(InvalidCollectionsProperty {
+                            .ok_or(InvalidDependsProperty {
                                 src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
                             })
                             .unwrap()
@@ -366,7 +384,7 @@ impl Page {
             permalink: permalink.unwrap_or_default(),
             date,
             layout,
-            collections,
+            depends,
             directory: path
                 .parent()
                 .unwrap_or(&PathBuf::new())
@@ -377,7 +395,7 @@ impl Page {
                 .unwrap_or(&OsString::new())
                 .to_string_lossy()
                 .to_string(),
-            collection: Page::get_collection_name_from_path(path.clone())?,
+            collections: Page::get_collections_from_path(path.clone())?,
             is_layout: Page::is_layout_path(path)?,
             url: String::new(),
             rendered: String::new(),

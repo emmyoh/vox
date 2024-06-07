@@ -20,13 +20,14 @@ use std::net::Ipv4Addr;
 use std::path::Path;
 use std::sync::mpsc::channel;
 use std::{fs, path::PathBuf, time::Duration};
+use syntect::highlighting::ThemeSet;
+use syntect::html::css_for_theme_with_class_style;
 use ticky::Stopwatch;
 use tokio::time::sleep;
 use toml::Table;
 use tracing::{debug, error, info, trace, warn, Level};
 use vox::builds::EdgeType;
 use vox::date::{self, Date};
-use vox::templates;
 use vox::{builds::Build, page::Page, templates::create_liquid_parser};
 
 #[global_allocator]
@@ -130,7 +131,7 @@ async fn main() -> miette::Result<()> {
             let build_loop = tokio::spawn(async move {
                 loop {
                     let building = tokio::spawn(build(watch, visualise_dag, generate_syntax_css));
-                    match building.await {
+                    match building.await.unwrap() {
                         Ok(_) => {
                             if !watch {
                                 break;
@@ -180,7 +181,7 @@ async fn main() -> miette::Result<()> {
             let build_loop = tokio::spawn(async move {
                 loop {
                     let building = tokio::spawn(build(watch, visualise_dag, generate_syntax_css));
-                    match building.await {
+                    match building.await.unwrap() {
                         Ok(_) => {
                             if !watch {
                                 break;
@@ -226,7 +227,7 @@ async fn main() -> miette::Result<()> {
                         .run(),
                     );
                     println!("Serving on {}:{} … ", Ipv4Addr::UNSPECIFIED, port);
-                    match serving.await {
+                    match serving.await.unwrap() {
                         Ok(_) => {}
                         Err(err) => {
                             error!("Serving failed: {:#?}", err);
@@ -264,6 +265,7 @@ fn insert_or_update_page(
     pages: &mut AHashMap<PathBuf, NodeIndex>,
     layouts: &mut AHashMap<PathBuf, HashSet<NodeIndex>>,
     collection_dependents: &mut AHashMap<String, HashSet<NodeIndex>>,
+    collection_members: &mut AHashMap<String, HashSet<NodeIndex>>,
     locale: Locale,
 ) -> miette::Result<()> {
     let entry = fs::canonicalize(entry).into_diagnostic()?;
@@ -299,8 +301,9 @@ fn insert_or_update_page(
     // A page's parents are pages in the collections it depends on. Its layout is a child.
     let layout = page.layout.clone();
     let collections = page.collections.clone();
+    let depends = page.depends.clone();
     debug!("Layout used: {:?} … ", layout);
-    debug!("Collections used: {:?} … ", collections);
+    debug!("Collections used: {:?} … ", depends);
     if let Some(layout) = layout {
         // Layouts are inserted multiple times, once for each page that uses them.
         let layout_path = fs::canonicalize(format!("layouts/{}.vox", layout))
@@ -346,6 +349,17 @@ fn insert_or_update_page(
     }
     if let Some(collections) = collections {
         for collection in collections {
+            if let Some(collection_members) = collection_members.get_mut(&collection) {
+                collection_members.insert(index);
+            } else {
+                let mut new_set = HashSet::new();
+                new_set.insert(index);
+                collection_members.insert(collection.clone(), new_set);
+            }
+        }
+    }
+    if let Some(depends) = depends {
+        for collection in depends {
             if let Some(collection_dependents) = collection_dependents.get_mut(&collection) {
                 collection_dependents.insert(index);
             } else {
@@ -353,29 +367,29 @@ fn insert_or_update_page(
                 new_set.insert(index);
                 collection_dependents.insert(collection.clone(), new_set);
             }
-            let collection = fs::canonicalize(collection).into_diagnostic()?;
-            for entry in
-                glob(&format!("{}/**/*.vox", collection.to_string_lossy())).into_diagnostic()?
-            {
-                let entry = fs::canonicalize(entry.into_diagnostic()?).into_diagnostic()?;
-                if pages.get(&entry).is_none() {
-                    info!("Inserting collection page: {:?} … ", entry);
-                    let collection_page = path_to_page(entry.clone(), locale)?;
-                    debug!("{:#?}", collection_page);
-                    let collection_page_index =
-                        dag.add_parent(index, EdgeType::Collection, collection_page);
-                    pages.insert(entry, collection_page_index.1);
-                } else {
-                    info!(
-                        "Setting collection page ({:?}) as parent of {:?} … ",
-                        entry,
-                        page.to_path_string()
-                    );
-                    let collection_page_index = pages[&entry];
-                    dag.add_edge(collection_page_index, index, EdgeType::Collection)
-                        .into_diagnostic()?;
-                }
-            }
+            // let collection = fs::canonicalize(collection).into_diagnostic()?;
+            // for entry in
+            //     glob(&format!("{}/**/*.vox", collection.to_string_lossy())).into_diagnostic()?
+            // {
+            //     let entry = fs::canonicalize(entry.into_diagnostic()?).into_diagnostic()?;
+            //     if pages.get(&entry).is_none() {
+            //         info!("Inserting collection page: {:?} … ", entry);
+            //         let collection_page = path_to_page(entry.clone(), locale)?;
+            //         debug!("{:#?}", collection_page);
+            //         let collection_page_index =
+            //             dag.add_parent(index, EdgeType::Collection, collection_page);
+            //         pages.insert(entry, collection_page_index.1);
+            //     } else {
+            //         info!(
+            //             "Setting collection page ({:?}) as parent of {:?} … ",
+            //             entry,
+            //             page.to_path_string()
+            //         );
+            //         let collection_page_index = pages[&entry];
+            //         dag.add_edge(collection_page_index, index, EdgeType::Collection)
+            //             .into_diagnostic()?;
+            //     }
+            // }
         }
     }
 
@@ -390,6 +404,7 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
     // let mut layouts_by_index: AHashMap<NodeIndex, (PathBuf, PathBuf)> = AHashMap::new();
     let mut layouts: AHashMap<PathBuf, HashSet<NodeIndex>> = AHashMap::new();
     let mut collection_dependents: AHashMap<String, HashSet<NodeIndex>> = AHashMap::new();
+    let mut collection_members: AHashMap<String, HashSet<NodeIndex>> = AHashMap::new();
 
     // Initial DAG construction.
     info!("Constructing DAG … ");
@@ -406,6 +421,7 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
             &mut pages,
             &mut layouts,
             &mut collection_dependents,
+            &mut collection_members,
             global.1,
         )?;
     }
@@ -420,8 +436,20 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
                 &mut pages,
                 &mut layouts,
                 &mut collection_dependents,
+                &mut collection_members,
                 global.1,
             )?;
+        }
+    }
+    // We construct edges between collection members and dependents.
+    for (collection, members) in collection_members {
+        if let Some(dependents) = collection_dependents.get(&collection) {
+            for member in members {
+                for dependent in dependents {
+                    dag.add_edge(member, *dependent, EdgeType::Collection)
+                        .into_diagnostic()?;
+                }
+            }
         }
     }
 
@@ -492,6 +520,7 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
             let mut new_layouts: AHashMap<PathBuf, HashSet<NodeIndex>> = AHashMap::new();
             let mut new_collection_dependents: AHashMap<String, HashSet<NodeIndex>> =
                 AHashMap::new();
+            let mut new_collection_members: AHashMap<String, HashSet<NodeIndex>> = AHashMap::new();
 
             // New DAG construction.
             info!("Constructing DAG … ");
@@ -507,6 +536,7 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
                     &mut new_pages,
                     &mut new_layouts,
                     &mut new_collection_dependents,
+                    &mut new_collection_members,
                     global.1,
                 )?;
             }
@@ -519,8 +549,20 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
                         &mut new_pages,
                         &mut new_layouts,
                         &mut new_collection_dependents,
+                        &mut new_collection_members,
                         global.1,
                     )?;
+                }
+            }
+            for (collection, members) in new_collection_members {
+                if let Some(dependents) = new_collection_dependents.get(&collection) {
+                    for member in members {
+                        for dependent in dependents {
+                            new_dag
+                                .add_edge(member, *dependent, EdgeType::Collection)
+                                .into_diagnostic()?;
+                        }
+                    }
                 }
             }
 
@@ -758,7 +800,7 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
                     .into_diagnostic()?;
             }
             if generate_syntax_css {
-                templates::generate_syntax_css()?;
+                generate_syntax_stylesheets()?;
             }
             timer.stop();
             println!(
@@ -858,7 +900,7 @@ async fn generate_site(
             .into_diagnostic()?;
     }
     if generate_syntax_css {
-        templates::generate_syntax_css()?;
+        generate_syntax_stylesheets()?;
     }
     timer.stop();
     println!(
@@ -903,4 +945,28 @@ fn get_global_context() -> miette::Result<(Object, Locale)> {
         }),
         locale,
     ))
+}
+
+/// Generate stylesheets for syntax highlighting.
+fn generate_syntax_stylesheets() -> miette::Result<()> {
+    let css_path = PathBuf::from("output/css/");
+    let dark_css_path = css_path.join("dark-code.css");
+    let light_css_path = css_path.join("light-code.css");
+    let code_css_path = css_path.join("code.css");
+    std::fs::create_dir_all(css_path).into_diagnostic()?;
+
+    let ts = ThemeSet::load_defaults();
+    let dark_theme = &ts.themes["base16-ocean.dark"];
+    let css_dark = css_for_theme_with_class_style(dark_theme, syntect::html::ClassStyle::Spaced)
+        .into_diagnostic()?;
+    std::fs::write(dark_css_path, css_dark).into_diagnostic()?;
+
+    let light_theme = &ts.themes["base16-ocean.light"];
+    let css_light = css_for_theme_with_class_style(light_theme, syntect::html::ClassStyle::Spaced)
+        .into_diagnostic()?;
+    std::fs::write(light_css_path, css_light).into_diagnostic()?;
+
+    let css = r#"@import url("light-code.css") (prefers-color-scheme: light);@import url("dark-code.css") (prefers-color-scheme: dark);"#;
+    std::fs::write(code_css_path, css).into_diagnostic()?;
+    Ok(())
 }

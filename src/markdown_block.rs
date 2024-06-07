@@ -1,6 +1,3 @@
-use std::io::BufWriter;
-use std::io::Write;
-
 use comrak::markdown_to_html_with_plugins;
 use comrak::plugins::syntect::SyntectAdapter;
 use comrak::ComrakPlugins;
@@ -14,6 +11,8 @@ use liquid_core::Result;
 use liquid_core::Runtime;
 use liquid_core::Template;
 use liquid_core::{BlockReflection, ParseBlock, TagBlock, TagTokenIter};
+use std::io::BufWriter;
+use std::io::Write;
 
 /// Render Markdown as HTML
 ///

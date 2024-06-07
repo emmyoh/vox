@@ -74,7 +74,7 @@ impl Build {
                     if Page::is_layout_path(label.clone())? {
                         node.look.fill_color = Some(Color::fast("#FFDFBA"));
                     } else {
-                        match Page::get_collection_name_from_path(label)? {
+                        match Page::get_collections_from_path(label)? {
                             Some(_) => {
                                 node.look.fill_color = Some(Color::fast("#DAFFBA"));
                             }
@@ -303,18 +303,20 @@ impl Build {
                 // If the parent page is in a collection this page depends on, make note of it.
                 EdgeType::Collection => {
                     let parent_path = parent_page.to_path_string();
-                    let collection_name = parent_page.get_collection_name()?.unwrap();
+                    let collection_names = parent_page.get_collections()?.unwrap();
                     info!(
-                        "Parent page ({:?}) is in collection: {:?}",
-                        parent_path, collection_name
+                        "Parent page ({:?}) is in collections: {:?}",
+                        parent_path, collection_names
                     );
-                    if collection_pages.contains_key(&collection_name) {
-                        collection_pages
-                            .get_mut(&collection_name)
-                            .unwrap()
-                            .push(parent.1);
-                    } else {
-                        collection_pages.insert(collection_name.clone(), vec![parent.1]);
+                    for collection_name in collection_names {
+                        if collection_pages.contains_key(&collection_name) {
+                            collection_pages
+                                .get_mut(&collection_name)
+                                .unwrap()
+                                .push(parent.1);
+                        } else {
+                            collection_pages.insert(collection_name.clone(), vec![parent.1]);
+                        }
                     }
                 }
             }

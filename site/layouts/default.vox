@@ -11,6 +11,14 @@
           <a href="{{ global.url }}" title="Home">{{ global.title }}</a>
           <small>{{ global.description }}</small>
         </h3>
+        {% assign output_name = page.url | split: "/" | last %}
+        {% if output_name != 'index.html' %}
+          {% if page.collections.first %}
+            <h4>
+              <a href="{{ global.url | append: "/" | append: page.collections.first | append: "/index.html" }}" title="Back to index">⟵ {{ page.collections.first | capitalize }}</a>
+            </h4>
+          {% endif %}
+        {% endif %}
       </header>
       <main id="skip-target">
         {{ layouts | map: "rendered" | first }}
