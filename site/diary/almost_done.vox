@@ -54,6 +54,9 @@ In `main.rs`, upon initial inspection, the following loops may be parallelised:
 
 ### Logo
 
+I wanted the logo to depict something living.
+I ended up picking [a botanical illustration of a pineapple](https://biodiversitylibrary.org/page/5176503).
+
 ---
 
 ## Future Goals

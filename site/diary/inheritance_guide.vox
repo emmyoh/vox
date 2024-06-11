@@ -99,7 +99,7 @@ Two code patterns were found in the code: [`manual_flatten`](https://rust-lang.g
 
 ##### Before
 ```rust
-for entry in snippets_directory.flatten() {
+for entry in snippets_directory {
     if let Ok(entry) = entry {
         if entry.file_type().unwrap().is_file() {
             let name = entry

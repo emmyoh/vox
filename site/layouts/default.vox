@@ -7,6 +7,7 @@
     <a id="skip" href="#skip-target">Skip to main content</a>
     <div class="container content">
       <header class="masthead">
+        <img src="{{ '/logo.png' | prepend: global.url }}" class="logo"></img>
         <h3 class="masthead-title">
           <a href="{{ global.url }}" title="Home">{{ global.title }}</a>
           <small>{{ global.description }}</small>
@@ -29,5 +30,6 @@
         </small>
       </footer>
     </div>
+    <script src="//instant.page/5.2.0" type="module" integrity="sha384-jnZyxPjiipYXnSU0ygqeac2q7CVYMbh84q0uHVRRxEtvFPiQYbXWUorga2aqZJ0z"></script>
   </body>
 </html>

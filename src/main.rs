@@ -105,6 +105,7 @@ async fn main() -> miette::Result<()> {
                 _ => Level::TRACE,
             };
             let mut subscriber_builder = tracing_subscriber::fmt()
+                .with_env_filter("vox")
                 .pretty()
                 .with_max_level(verbosity_level)
                 .with_file(false)
@@ -438,10 +439,28 @@ async fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> m
                         path.strip_prefix(current_path.clone())
                             .unwrap_or(path)
                             .starts_with("global.toml")
-                            || path.starts_with("snippets/")
+                            || path
+                                .strip_prefix(current_path.clone())
+                                .unwrap_or(path)
+                                .starts_with("snippets/")
                     })
                 });
-                trace!("Changes detected: {:#?} … ", events);
+                trace!(
+                    "Changes detected: {:#?} … ",
+                    events
+                        .into_iter()
+                        .map(|event| event
+                            .paths
+                            .clone()
+                            .into_iter()
+                            .map(|path| {
+                                path.strip_prefix(current_path.clone())
+                                    .unwrap_or(&path)
+                                    .to_path_buf()
+                            })
+                            .collect::<Vec<_>>())
+                        .collect::<Vec<_>>()
+                );
             }
 
             // 1. Build a new DAG.
