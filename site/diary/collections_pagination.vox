@@ -11,8 +11,8 @@ permalink = "date"
 - Supporting pages in multiple collections at once with path nesting.
 - If a build has failed, don't immediately retry.
 - Upgrading all direct dependencies.
+- Rebuild if `global.toml` file or `snippets` subdirectory have changed.
 - Implement pagination.
-- Modify log output to be more helpful for end-users.
 
 ### Collections
 
@@ -31,6 +31,10 @@ This was always the intended behaviour. The mistake was in accidentally checking
 
 Notably, this brought my implementation of Jekyll's sorting filter, which was merged into the Liquid Rust implementation.
 
+### Rebuild Global or Snippet Changes
+
+Since neither `global.toml` or snippets are represented in the DAG (yet), the best that can be done is simply rebuilding everything if either change.
+
 ### Pagination
 
 Pages may have a `pagination` frontmatter value, containing:
@@ -45,13 +49,16 @@ The `pagination.page_number` is used in a page's `permalink`, and can be used wi
 - to calculate the remaining number of pages
     - This requires the length of the paginated collection as well
 
+This is not feasible to implement; pages are added to the DAG in an unpredictable order, so calculating `pagination.page_number` for each copy of a page is not possible, as the length of the collection being paginated is not yet known.
+
 ---
 
 ## Future Goals
 - Parallelising as much as possible.
 - Removing code that was commented out.
-- Documenting the CLI code.
 - Creating a logo for Vox.
+- Incorporating `global.toml` into DAG construction.
 - Incorporating snippets into DAG construction.
+- Move as much CLI code as possible into library.
 
 {% endmarkdown %}

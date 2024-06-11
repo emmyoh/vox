@@ -166,13 +166,6 @@ impl Page {
     ///
     /// Whether or not the page is a layout.
     pub fn is_layout(&self) -> miette::Result<bool> {
-        // let current_directory =
-        //     fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
-        // let page_path = fs::canonicalize(self.to_path_string()).into_diagnostic()?;
-        // let path_difference = page_path
-        //     .strip_prefix(&current_directory)
-        //     .into_diagnostic()?;
-        // Ok(path_difference.starts_with("layouts"))
         Page::is_layout_path(self.to_path_string())
     }
 
@@ -182,17 +175,6 @@ impl Page {
     ///
     /// The names of the collections a page belongs to, or `None` if the page does not belong to a collection.
     pub fn get_collections(&self) -> miette::Result<Option<Vec<String>>> {
-        // let current_directory =
-        //     fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
-        // let page_path = fs::canonicalize(self.to_path_string()).into_diagnostic()?;
-        // let path_difference = page_path
-        //     .strip_prefix(&current_directory)
-        //     .into_diagnostic()?;
-        // let path_components: Vec<String> = path_difference
-        //     .components()
-        //     .map(|c| c.as_os_str().to_string_lossy().to_string())
-        //     .collect();
-        // Ok(Some(path_components[0].clone()))
         Page::get_collections_from_path(self.to_path_string())
     }
 
@@ -322,25 +304,7 @@ impl Page {
         let (frontmatter, body) = Self::get_frontmatter_and_body(contents.clone(), path.clone())?;
         let frontmatter_data = frontmatter.parse::<Table>().into_diagnostic()?;
         let frontmatter_data_clone = frontmatter_data.clone();
-        // let date_value: &Datetime = frontmatter_data_clone
-        //     .get("date")
-        //     .ok_or(DateNotFound {
-        //         src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
-        //     })
-        //     .into_diagnostic()?
-        //     .as_datetime()
-        //     .ok_or(DateNotValid {
-        //         src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
-        //     })
-        //     .into_diagnostic()?;
-        // let locale = locale_string_to_locale(locale);
         let date = if let Some(date) = frontmatter_data.get("date") {
-            // if date.as_str().is_none() {
-            //     return Err(DateNotFound {
-            //         src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
-            //     }
-            //     .into());
-            // }
             let date_value = date
                 .as_datetime()
                 .ok_or(DateNotValid {

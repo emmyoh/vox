@@ -49,11 +49,12 @@ The `page` context is composed of several fields. Refer to [the developer docume
 The `layouts` context is a list where each item is a layout page's context, but with the final item being the context of the page above the layouts; items are in ascending order.
 If you need a better intuition of how this list is ordered, visualise the DAG of your site; for each layout page, the first page in this list is the page directly above it.
 
-The `layout` context is the context of a specific layout page being rendered.
-
+Additionally, there is the `layout` context, being the specific layout page being rendered.
 The `page` context is the context of the page above any layouts.
 
 As a reminder, the terminal pages of the DAG are the pages which are output by Vox; rendering is done in topological order (from the root pages down to the terminal pages).
+
+---
 
 As an example, suppose the following layouts:
 
@@ -176,6 +177,8 @@ Each page would be rendered as follows:
     </body>
 </html>
 ```
+
+---
 
 ## Include
 

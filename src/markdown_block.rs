@@ -27,7 +27,7 @@ pub fn render_markdown(text_to_render: String) -> String {
     options.extension.autolink = false;
     options.extension.tasklist = true;
     options.extension.superscript = false;
-    options.extension.header_ids = Some(String::from("h-"));
+    options.extension.header_ids = Some(String::new());
     options.extension.footnotes = true;
     options.extension.description_lists = true;
     options.extension.front_matter_delimiter = None;
@@ -39,7 +39,7 @@ pub fn render_markdown(text_to_render: String) -> String {
     options.parse.default_info_string = None;
     options.parse.relaxed_tasklist_matching = true;
     options.parse.relaxed_autolinks = true;
-    options.render.hardbreaks = true;
+    options.render.hardbreaks = false;
     options.render.github_pre_lang = true;
     options.render.full_info_string = true;
     options.render.width = 80;
@@ -89,15 +89,12 @@ impl ParseBlock for MarkdownBlock {
         arguments.expect_nothing()?;
 
         let raw_content = tokens.escape_liquid(false)?.to_string();
-        // let content = render_markdown(raw_content);
         let content = parser::parse(&raw_content, options)
             .map(runtime::Template::new)
             .unwrap();
-        // .render(&runtime)?;
 
         tokens.assert_empty();
         Ok(Box::new(Markdown { content }))
-        // Ok(Box::new(renderable))
     }
 
     fn reflection(&self) -> &dyn BlockReflection {

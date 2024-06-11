@@ -17,7 +17,7 @@ use liquid::{to_object, Object, Parser};
 use liquid_core::to_value;
 use miette::IntoDiagnostic;
 use std::{env, fs, path::PathBuf};
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 /// Information held in memory while performing a build.
 #[derive(Clone, Default)]
@@ -58,7 +58,6 @@ impl Build {
                 format!("label = \"{}\"", label)
             },
         );
-        debug!("DAG: {:#?}", dag_graphviz);
         let mut parser = DotParser::new(&format!("{:?}", dag_graphviz));
         let tree = parser.process();
         if let Ok(tree) = tree {
@@ -212,23 +211,11 @@ impl Build {
     ///
     /// A list of all nodes that were rendered.
     pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<Vec<NodeIndex>> {
-        info!("Rendering all pages … ");
+        trace!("Rendering all pages … ");
         if visualise_dag {
             self.visualise_dag()?;
         }
         let mut rendered_indices = Vec::new();
-        // let root_indices = self.find_root_indices();
-        // debug!("Root indices: {:?}", root_indices);
-        // info!(
-        //     "Rendering root pages: {:#?} … ",
-        //     root_indices
-        //         .iter()
-        //         .map(|index| self.dag.graph()[*index].to_path_string())
-        //         .collect::<Vec<_>>()
-        // );
-        // for root_index in root_indices {
-        //     self.render_recursively(root_index, &mut rendered_indices)?;
-        // }
         let indices = toposort(&self.dag.graph(), None).unwrap_or_default();
         for index in indices {
             self.render_page(index, false, &mut rendered_indices)?;
@@ -262,17 +249,16 @@ impl Build {
         let root_path_difference = root_path
             .strip_prefix(&current_directory)
             .into_diagnostic()?;
-        info!("Rendering page: {:?}", root_path_difference);
-        debug!("{:#?}", root_page);
+        debug!("Rendering page: {:?}", root_path_difference);
         let mut root_contexts = self.contexts.clone();
         if root_path_difference.starts_with(PathBuf::from("layouts/")) {
-            trace!("Page is a layout page … ");
+            debug!("Page is a layout page … ");
             let layout_object =
                 liquid_core::Value::Object(to_object(&root_page).into_diagnostic()?);
             root_contexts.insert("layout".into(), layout_object.clone());
             self.insert_layout_ancestor_contexts(root_index, &mut root_contexts)?;
         } else {
-            trace!("Page is not a layout page … ");
+            debug!("Page is not a layout page … ");
             let page_object = liquid_core::Value::Object(to_object(&root_page).into_diagnostic()?);
             root_contexts.insert("page".into(), page_object.clone());
         }
@@ -283,28 +269,16 @@ impl Build {
             .parents(root_index)
             .iter(&self.dag)
             .collect::<Vec<_>>();
-        debug!("Parents: {:?}", parents);
         for parent in parents {
             let parent_page = &self.dag.graph()[parent.1];
             let edge = self.dag.edge_weight(parent.0).unwrap();
             match edge {
-                // // If the parent page is using this page as a layout, add its context as `page`.
-                EdgeType::Layout => {
-                    // info!(
-                    //     "Page (`{}`) is a layout page (of `{}`) … ",
-                    //     root_page.to_path_string(),
-                    //     parent_page.to_path_string()
-                    // );
-                    // debug!("{:#?}", parent_page);
-                    // let parent_object =
-                    //     liquid_core::Value::Object(to_object(&parent_page).into_diagnostic()?);
-                    // root_contexts.insert("page".into(), parent_object.clone());
-                }
+                EdgeType::Layout => {}
                 // If the parent page is in a collection this page depends on, make note of it.
                 EdgeType::Collection => {
                     let parent_path = parent_page.to_path_string();
                     let collection_names = parent_page.get_collections()?.unwrap();
-                    info!(
+                    debug!(
                         "Parent page ({:?}) is in collections: {:?}",
                         parent_path, collection_names
                     );
@@ -322,7 +296,7 @@ impl Build {
             }
         }
         // Add the collection pages to the root page's contexts.
-        info!("Adding any collections to page's contexts … ");
+        trace!("Adding any collections to page's contexts … ");
         for (collection_name, collection) in collection_pages.iter_mut() {
             let collection_pages: Vec<liquid::Object> = collection
                 .iter()
@@ -332,23 +306,12 @@ impl Build {
                         .unwrap()
                 })
                 .collect();
-            debug!("`{}` pages: {:#?}", collection_name, collection_pages);
             let collection_object = to_value(&collection_pages).into_diagnostic()?;
             root_contexts.insert(collection_name.clone().into(), collection_object.clone());
         }
-        debug!(
-            "Contexts for `{}`: {:#?}",
-            root_page.to_path_string(),
-            root_contexts
-        );
         let root_page = self.dag.node_weight_mut(root_index).unwrap();
         if root_page.render(&root_contexts, &self.template_parser)? {
             rendered_indices.push(root_index);
-            debug!(
-                "After rendering `{}`: {:#?}",
-                root_page.to_path_string(),
-                root_page
-            );
         }
 
         if recursive {
@@ -357,7 +320,6 @@ impl Build {
                 .children(root_index)
                 .iter(&self.dag)
                 .collect::<Vec<_>>();
-            debug!("Children: {:?}", children);
             for child in children {
                 self.render_page(child.1, recursive, rendered_indices)?;
             }

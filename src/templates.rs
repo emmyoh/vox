@@ -27,7 +27,6 @@ impl SnippetSource {
         self.names.clear();
         if let Ok(snippets_directory) = std::fs::read_dir("snippets") {
             for entry in snippets_directory.flatten() {
-                // if let Ok(entry) = entry {
                 if entry.file_type().unwrap().is_file() {
                     let name = entry
                         .path()
@@ -37,7 +36,6 @@ impl SnippetSource {
                         .to_string();
                     self.names.push(name);
                 }
-                // }
             }
         }
     }
@@ -58,14 +56,6 @@ impl liquid::partials::PartialSource for SnippetSource {
 
     fn try_get(&self, name: &str) -> Option<Cow<str>> {
         let path = PathBuf::from(format!("snippets/{}", name));
-        // if path.exists() {
-        //     return Some(std::fs::read_to_string(path).unwrap().into());
-        // }
-        // let path = glob(&format!("snippets/{}.*", name))
-        //     .unwrap()
-        //     .next()
-        //     .unwrap()
-        //     .unwrap();
         Some(std::fs::read_to_string(path).unwrap().into())
     }
 }
