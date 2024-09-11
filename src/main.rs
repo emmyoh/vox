@@ -38,6 +38,9 @@ static GLOBAL: MiMalloc = MiMalloc;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+    /// The level of log output; warnings, information, debugging messages, and trace logs.
+    #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 2, global = true)]
+    verbosity: u8,
 }
 #[derive(Subcommand)]
 enum Commands {
@@ -49,9 +52,6 @@ enum Commands {
         /// Watch for changes.
         #[arg(short, long, default_value_t = false)]
         watch: bool,
-        /// The level of log output; warnings, information, debugging messages, and trace logs.
-        #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
-        verbosity: u8,
         /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
@@ -70,9 +70,6 @@ enum Commands {
         /// The port to serve the site on.
         #[arg(short, long, default_value_t = 80)]
         port: u16,
-        /// The level of log output; warnings, information, debugging messages, and trace logs.
-        #[arg(short, long, action = clap::ArgAction::Count, default_value_t = 0)]
-        verbosity: u8,
         /// Visualise the DAG.
         #[arg(short = 'd', long, default_value_t = false)]
         visualise_dag: bool,
@@ -84,19 +81,19 @@ enum Commands {
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> miette::Result<()> {
+    miette::set_panic_hook();
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Build {
             path,
             watch,
-            verbosity,
             visualise_dag,
             generate_syntax_css,
         }) => {
             if let Some(path) = path {
                 std::env::set_current_dir(path).into_diagnostic()?;
             }
-            let verbosity_level = match verbosity {
+            let verbosity_level = match cli.verbosity {
                 0 => Level::ERROR,
                 1 => Level::WARN,
                 2 => Level::INFO,
@@ -105,12 +102,11 @@ async fn main() -> miette::Result<()> {
                 _ => Level::TRACE,
             };
             let mut subscriber_builder = tracing_subscriber::fmt()
-                .with_env_filter("vox")
+                .with_env_filter(format!("vox={}", verbosity_level))
                 .pretty()
-                .with_max_level(verbosity_level)
                 .with_file(false)
                 .with_line_number(false);
-            if verbosity >= 3 {
+            if cli.verbosity >= 3 {
                 subscriber_builder = subscriber_builder
                     .with_thread_ids(true)
                     .with_thread_names(true)
@@ -143,14 +139,13 @@ async fn main() -> miette::Result<()> {
             path,
             watch,
             port,
-            verbosity,
             visualise_dag,
             generate_syntax_css,
         }) => {
             if let Some(path) = path {
                 std::env::set_current_dir(path).into_diagnostic()?;
             }
-            let verbosity_level = match verbosity {
+            let verbosity_level = match cli.verbosity {
                 0 => Level::ERROR,
                 1 => Level::WARN,
                 2 => Level::INFO,
@@ -159,11 +154,11 @@ async fn main() -> miette::Result<()> {
                 _ => Level::TRACE,
             };
             let mut subscriber_builder = tracing_subscriber::fmt()
+                .with_env_filter(format!("vox={}", verbosity_level))
                 .pretty()
-                .with_max_level(verbosity_level)
                 .with_file(false)
                 .with_line_number(false);
-            if verbosity >= 3 {
+            if cli.verbosity >= 3 {
                 subscriber_builder = subscriber_builder
                     .with_thread_ids(true)
                     .with_thread_names(true)

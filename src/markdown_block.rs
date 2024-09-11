@@ -35,6 +35,11 @@ pub fn render_markdown(text_to_render: String) -> String {
     options.extension.math_dollars = true;
     options.extension.math_code = true;
     options.extension.shortcodes = true;
+    options.extension.wikilinks_title_after_pipe = true;
+    options.extension.wikilinks_title_before_pipe = false;
+    options.extension.underline = true;
+    options.extension.spoiler = true;
+    options.extension.greentext = false;
     options.parse.smart = true;
     options.parse.default_info_string = None;
     options.parse.relaxed_tasklist_matching = true;
@@ -47,6 +52,12 @@ pub fn render_markdown(text_to_render: String) -> String {
     options.render.escape = false;
     options.render.list_style = ListStyleType::Dash;
     options.render.sourcepos = false;
+    options.render.escaped_char_spans = false;
+    options.render.ignore_setext = false;
+    options.render.ignore_empty_links = true;
+    options.render.gfm_quirks = false;
+    options.render.prefer_fenced = false;
+    options.render.figure_with_caption = false;
     let mut plugins = ComrakPlugins::default();
     let syntax_highlighting_adapter = SyntectAdapter::new(None);
     plugins.render.codefence_syntax_highlighter = Some(&syntax_highlighting_adapter);

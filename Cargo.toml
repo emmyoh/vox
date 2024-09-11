@@ -23,29 +23,29 @@ required-features = ["cli"]
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde", "unstable-locales"] }
-clap = { version = "4.5.6", features = ["derive", "cargo"], optional = true }
-comrak = { version = "0.24.1", features = ["syntect", "shortcodes"], default-features = false }
+clap = { version = "4.5.17", features = ["derive", "cargo"], optional = true }
+comrak = { version = "0.28.0", features = ["syntect", "shortcodes"], default-features = false }
 daggy = { version = "0.8.0", features = ["stable_dag"] }
-toml = "0.8.14"
-liquid = "0.26.6"
-liquid-core = "0.26.6"
-liquid-lib = { version = "0.26.6", features = ["all", "stdlib", "jekyll", "shopify", "extra"] }
-serde = "1.0.203"
+toml = "0.8.19"
+liquid = "0.26.9"
+liquid-core = "0.26.9"
+liquid-lib = { version = "0.26.9", features = ["all", "stdlib", "jekyll", "shopify", "extra"] }
+serde = "1.0.210"
 sys-locale = "0.3.1"
 latex2mathml = "0.2.3"
 ahash = { version = "0.8.11", features = ["std", "serde", "runtime-rng"] }
-mimalloc = { version = "0.1.42", optional = true }
+mimalloc = { version = "0.1.43", optional = true }
 ticky = { version = "1.0.2", optional = true }
 miette = { version = "7.2.0", features = ["fancy", "syntect-highlighter"] }
-thiserror = "1.0.61"
+thiserror = "1.0.63"
 glob = "0.3.1"
-tokio = { version = "1.38.0", features = ["full"], optional = true }
+tokio = { version = "1.40.0", features = ["full"], optional = true }
 futures = "0.3.30"
 tracing-subscriber = { version = "0.3.18", optional = true, features = ["env-filter"]}
 tracing = "0.1.40"
 notify-debouncer-full = { version = "0.3.1", default-features = false, optional = true }
-actix-files = { version = "0.6.5", optional = true }
-actix-web = { version = "4.6.0", optional = true }
+actix-files = { version = "0.6.6", optional = true }
+actix-web = { version = "4.9.0", optional = true }
 layout-rs = "0.1.2"
 html-escape = "0.2.13"
 syntect = "5.2.0"
