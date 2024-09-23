@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 #![doc = include_str!("../README.md")]
-#![feature(doc_auto_cfg)]
+// #![feature(doc_auto_cfg)]
 #![warn(missing_docs)]
 
 /// Operations relevant to the build process.
