@@ -5,9 +5,9 @@ use chrono::NaiveDateTime;
 use chrono::NaiveTime;
 use chrono::TimeZone;
 use chrono::Utc;
+use core::fmt;
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt;
 use sys_locale::get_locale;
 use tracing::debug;
 

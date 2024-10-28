@@ -3,14 +3,15 @@ use crate::{
     error::{DateNotValid, FrontmatterNotFound, InvalidDependsProperty},
 };
 use chrono::Locale;
+use core::fmt;
 use liquid::{Object, Parser};
 use miette::IntoDiagnostic;
 use miette::NamedSource;
+use path_clean::PathClean;
 use serde::{Deserialize, Serialize};
 use std::{
     ffi::OsString,
-    fmt, fs,
-    path::{Path, PathBuf},
+    path::{Component, PathBuf},
 };
 use toml::Table;
 
@@ -65,14 +66,8 @@ impl Page {
     /// # Returns
     ///
     /// Whether or not the page is a layout.
-    pub fn is_layout_path<P: AsRef<Path>>(path: P) -> miette::Result<bool> {
-        let current_directory =
-            fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
-        let page_path = fs::canonicalize(path).into_diagnostic()?;
-        let path_difference = page_path
-            .strip_prefix(&current_directory)
-            .into_diagnostic()?;
-        Ok(path_difference.starts_with("layouts/"))
+    pub fn is_layout_path(path: impl Into<PathBuf>) -> bool {
+        path.into().clean().starts_with("layouts/")
     }
 
     /// Get the names of the collections a page belongs to based on its path.
@@ -84,42 +79,45 @@ impl Page {
     /// # Returns
     ///
     /// The names of the collections a page belongs to, or `None` if the page does not belong to a collection.
-    pub fn get_collections_from_path<P: AsRef<Path>>(
-        path: P,
+    pub fn get_collections_from_path(
+        path: impl Into<PathBuf>,
     ) -> miette::Result<Option<Vec<String>>> {
-        let current_directory =
-            fs::canonicalize(std::env::current_dir().into_diagnostic()?).into_diagnostic()?;
-        let page_path = fs::canonicalize(path).into_diagnostic()?;
-        let path_difference = page_path
-            .strip_prefix(&current_directory)
-            .into_diagnostic()?;
-        let path_components: Vec<String> = path_difference
+        let path_components: Vec<_> = path
+            .into()
+            .clean()
             .components()
-            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .filter_map(|x| match x {
+                Component::CurDir => None,
+                Component::RootDir => None,
+                Component::ParentDir => None,
+                Component::Prefix(_) => None,
+                Component::Normal(x) => Some(PathBuf::from(x)),
+            })
+            .filter(|x| x.extension().is_none())
             .collect();
-        let first_path_component = path_components[0].clone();
-        if first_path_component == "layouts" {
-            return Ok(None);
-        }
-        if Path::new(first_path_component.as_str()).is_file() {
-            return Ok(None);
+        if let Some(first_path_component) = path_components.first() {
+            if first_path_component.extension().is_some()
+                || *first_path_component == PathBuf::from("layouts")
+            {
+                return Ok(None);
+            }
         }
         let mut results = Vec::new();
-        let mut path_builder = Vec::new();
         for path_component in path_components {
-            if Path::new(&path_builder.join("/"))
-                .join(&path_component)
-                .is_file()
-            {
-                break;
-            }
-            results.push(path_component.clone());
-            path_builder.push(path_component.clone());
-            let current_path = path_builder.join("_");
-            if path_component != current_path {
-                results.push(path_builder.join("_"))
-            }
+            let path_to_this_component: Vec<_> = path_component
+                .components()
+                .filter_map(|x| match x {
+                    Component::CurDir => None,
+                    Component::RootDir => None,
+                    Component::ParentDir => None,
+                    Component::Prefix(_) => None,
+                    Component::Normal(x) => Some(x.to_string_lossy().to_string()),
+                })
+                .collect();
+            results.push(path_to_this_component.join("_"));
+            results.push(path_component.to_string_lossy().to_string())
         }
+        results.dedup();
         Ok(Some(results))
     }
 
@@ -165,7 +163,7 @@ impl Page {
     /// # Returns
     ///
     /// Whether or not the page is a layout.
-    pub fn is_layout(&self) -> miette::Result<bool> {
+    pub fn is_layout(&self) -> bool {
         Page::is_layout_path(self.to_path_string())
     }
 
@@ -299,8 +297,8 @@ impl Page {
     /// # Returns
     ///
     /// An instance of a page.
-    pub fn new(contents: String, path: PathBuf, locale: Locale) -> miette::Result<Page> {
-        let path = fs::canonicalize(path).into_diagnostic()?;
+    pub fn new(contents: String, path: impl Into<PathBuf>, locale: Locale) -> miette::Result<Page> {
+        let path = path.into().clean();
         let (frontmatter, body) = Self::get_frontmatter_and_body(contents.clone(), path.clone())?;
         let frontmatter_data = frontmatter.parse::<Table>().into_diagnostic()?;
         let frontmatter_data_clone = frontmatter_data.clone();
@@ -360,7 +358,7 @@ impl Page {
                 .to_string_lossy()
                 .to_string(),
             collections: Page::get_collections_from_path(path.clone())?,
-            is_layout: Page::is_layout_path(path)?,
+            is_layout: Page::is_layout_path(path),
             url: String::new(),
             rendered: String::new(),
         })

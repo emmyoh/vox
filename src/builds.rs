@@ -2,22 +2,16 @@ use crate::page::Page;
 use ahash::AHashMap;
 use chrono::Locale;
 use daggy::{
-    petgraph::{
-        algo::toposort,
-        dot::{Config, Dot},
-        Direction,
-    },
+    petgraph::{algo::toposort, Direction},
     stable_dag::StableDag,
     NodeIndex, Walker,
 };
-use layout::gv::DotParser;
-use layout::gv::GraphBuilder;
-use layout::{backends::svg::SVGWriter, core::color::Color, std_shapes::shapes::ShapeKind};
 use liquid::{to_object, Object, Parser};
 use liquid_core::to_value;
 use miette::IntoDiagnostic;
-use std::{env, fs, path::PathBuf};
-use tracing::{debug, trace, warn};
+use path_clean::PathClean;
+use std::path::PathBuf;
+use tracing::{debug, trace};
 
 /// Information held in memory while performing a build.
 #[derive(Clone, Default)]
@@ -42,58 +36,6 @@ pub enum EdgeType {
 }
 
 impl Build {
-    /// Visualise the DAG.
-    pub fn visualise_dag(&mut self) -> miette::Result<()> {
-        let dag_graph = self.dag.graph();
-        let dag_graphviz = Dot::with_attr_getters(
-            dag_graph,
-            &[Config::NodeNoLabel, Config::EdgeNoLabel],
-            &|_graph, edge| format!("label = \"{:?}\"", edge.weight()),
-            &|_graph, node| {
-                let path = PathBuf::from(node.1.to_path_string());
-                let relative_path = path
-                    .strip_prefix(fs::canonicalize(env::current_dir().unwrap()).unwrap())
-                    .unwrap();
-                let label = relative_path.to_string_lossy().to_string();
-                format!("label = \"{}\"", label)
-            },
-        );
-        let mut parser = DotParser::new(&format!("{:?}", dag_graphviz));
-        let tree = parser.process();
-        if let Ok(tree) = tree {
-            let mut gb = GraphBuilder::new();
-            gb.visit_graph(&tree);
-            let mut vg = gb.get();
-            let mut svg = SVGWriter::new();
-            for node_handle in vg.iter_nodes() {
-                let node = vg.element_mut(node_handle);
-                let old_shape = node.shape.clone();
-                if let ShapeKind::Circle(label) = old_shape {
-                    node.shape = ShapeKind::Box(label.clone());
-                    if Page::is_layout_path(label.clone())? {
-                        node.look.fill_color = Some(Color::fast("#FFDFBA"));
-                    } else {
-                        match Page::get_collections_from_path(label)? {
-                            Some(_) => {
-                                node.look.fill_color = Some(Color::fast("#DAFFBA"));
-                            }
-                            None => {
-                                node.look.fill_color = Some(Color::fast("#BADAFF"));
-                            }
-                        }
-                    }
-                }
-            }
-            vg.do_it(false, false, false, &mut svg);
-            let content = svg.finalize();
-            std::fs::create_dir_all("output").into_diagnostic()?;
-            std::fs::write("output/dag.svg", content).into_diagnostic()?;
-        } else {
-            warn!("Unable to visualise the DAG.")
-        }
-        Ok(())
-    }
-
     /// Get all descendants of a page in a DAG.
     ///
     /// # Arguments
@@ -160,7 +102,7 @@ impl Build {
         let parents = dag.parents(root_index).iter(dag).collect::<Vec<_>>();
         for parent in parents {
             let parent_page = &dag.graph()[parent.1];
-            if !parent_page.is_layout()? {
+            if !parent_page.is_layout() {
                 ancestors.push(parent.1);
             }
             let parent_ancestors = Build::get_non_layout_ancestors(dag, parent.1)?;
@@ -188,7 +130,7 @@ impl Build {
             let ancestor_page = &self.dag.graph()[ancestor];
             let ancestor_object =
                 liquid_core::Value::Object(to_object(&ancestor_page).into_diagnostic()?);
-            if ancestor_page.is_layout()? {
+            if ancestor_page.is_layout() {
                 let ancestor_object =
                     liquid_core::Value::Object(to_object(&ancestor_page).into_diagnostic()?);
                 layout_ancestor_contexts.push(ancestor_object);
@@ -210,11 +152,8 @@ impl Build {
     /// # Returns
     ///
     /// A list of all nodes that were rendered.
-    pub fn render_all(&mut self, visualise_dag: bool) -> miette::Result<Vec<NodeIndex>> {
+    pub fn render_all(&mut self) -> miette::Result<Vec<NodeIndex>> {
         trace!("Rendering all pages … ");
-        if visualise_dag {
-            self.visualise_dag()?;
-        }
         let mut rendered_indices = Vec::new();
         let indices = toposort(&self.dag.graph(), None).unwrap_or_default();
         for index in indices {
@@ -242,16 +181,11 @@ impl Build {
         recursive: bool,
         rendered_indices: &mut Vec<NodeIndex>,
     ) -> miette::Result<()> {
-        let current_directory =
-            fs::canonicalize(env::current_dir().into_diagnostic()?).into_diagnostic()?;
         let root_page = self.dag.graph()[root_index].to_owned();
-        let root_path = fs::canonicalize(root_page.to_path_string()).into_diagnostic()?;
-        let root_path_difference = root_path
-            .strip_prefix(&current_directory)
-            .into_diagnostic()?;
-        debug!("Rendering page: {:?}", root_path_difference);
+        let root_path: PathBuf = PathBuf::from(root_page.to_path_string()).clean();
+        debug!("Rendering page: {:?}", root_path);
         let mut root_contexts = self.contexts.clone();
-        if root_path_difference.starts_with(PathBuf::from("layouts/")) {
+        if root_path.starts_with(PathBuf::from("layouts/")) {
             debug!("Page is a layout page … ");
             let layout_object =
                 liquid_core::Value::Object(to_object(&root_page).into_diagnostic()?);

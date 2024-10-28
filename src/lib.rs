@@ -21,5 +21,9 @@ pub mod page;
 /// Errors originating during the build process.
 pub mod error;
 
-/// Template parsing and rendering.
-pub mod templates;
+/// The interface to the Vox build system.
+pub mod provider;
+
+/// A provider of the Vox build system that reads & writes from the file system.
+#[cfg(feature = "fs_provider")]
+pub mod fs_provider;
