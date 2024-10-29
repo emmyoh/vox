@@ -11,7 +11,7 @@ edition = "2021"
 [lib]
 name = "vox"
 path = "src/lib.rs"
-crate-type=["rlib", "dylib", "staticlib"]
+# crate-type=["rlib", "dylib", "staticlib"]
 
 [[bin]]
 name = "vox"
