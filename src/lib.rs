@@ -27,3 +27,7 @@ pub mod provider;
 /// A provider of the Vox build system that reads & writes from the file system.
 #[cfg(feature = "fs_provider")]
 pub mod fs_provider;
+
+/// A provider of the Vox build system that reads & writes from memory.
+#[cfg(feature = "ram_provider")]
+pub mod ram_provider;

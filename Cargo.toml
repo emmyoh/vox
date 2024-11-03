@@ -55,3 +55,4 @@ path-clean = "1.0.1"
 default = []
 cli = ["fs_provider", "dep:mimalloc", "dep:tokio", "dep:clap", "dep:tracing-subscriber", "dep:notify-debouncer-full", "dep:actix-files", "dep:actix-web"]
 fs_provider = []
+ram_provider = []

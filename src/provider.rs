@@ -38,7 +38,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Returns
     ///
     /// The file's contents as a string.
-    fn read_to_string(path: impl AsRef<std::path::Path>) -> miette::Result<String>;
+    fn read_to_string(&self, path: impl AsRef<std::path::Path>) -> miette::Result<String>;
 
     /// Write data to a file.
     ///
@@ -48,6 +48,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// * `contents` - The bytes to be written.
     fn write_file(
+        &self,
         path: impl AsRef<std::path::Path> + Clone,
         contents: impl AsRef<[u8]>,
     ) -> miette::Result<()>;
@@ -57,21 +58,21 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Arguments
     ///
     /// * `path` - The path to the file.
-    fn remove_file(path: impl AsRef<Path>) -> miette::Result<()>;
+    fn remove_file(&self, path: impl AsRef<Path>) -> miette::Result<()>;
 
     /// List all Vox pages.
     ///
     /// # Returns
     ///
     /// A list of paths to Vox pages.
-    fn list_vox_files() -> miette::Result<Vec<PathBuf>>;
+    fn list_vox_files(&self) -> miette::Result<Vec<PathBuf>>;
 
     /// List all Vox snippets.
     ///
     /// # Returns
     ///
     /// A list of paths to Vox snippets.
-    fn list_snippets() -> miette::Result<Vec<PathBuf>>;
+    fn list_snippets(&self) -> miette::Result<Vec<PathBuf>>;
 
     /// Obtain a source of Liquid partials.
     ///
@@ -120,8 +121,8 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Returns
     ///
     /// A Vox page.
-    fn path_to_page(path: PathBuf, locale: Locale) -> miette::Result<Page> {
-        Page::new(Self::read_to_string(path.clone())?, path, locale)
+    fn path_to_page(&self, path: PathBuf, locale: Locale) -> miette::Result<Page> {
+        Page::new(self.read_to_string(path.clone())?, path, locale)
     }
 
     /// Get the global Liquid context.
@@ -129,8 +130,8 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Returns
     ///
     /// The global Liquid context and detected locale.
-    fn get_global_context() -> miette::Result<(Object, Locale)> {
-        let global_context = match Self::read_to_string("global.toml") {
+    fn get_global_context(&self) -> miette::Result<(Object, Locale)> {
+        let global_context = match self.read_to_string("global.toml") {
             Ok(global_file) => global_file.parse::<Table>().into_diagnostic()?,
             Err(_) => format!("locale = '{}'", date::default_locale_string())
                 .parse::<Table>()
@@ -178,6 +179,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// * `locale` - The locale for date formatting.
     #[allow(clippy::too_many_arguments)]
     fn insert_or_update_page(
+        &self,
         entry: PathBuf,
         layout_index: Option<NodeIndex>,
         dag: &mut StableDag<Page, EdgeType>,
@@ -190,7 +192,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         let entry = entry.clean();
         let (page, index) = if !Page::is_layout_path(&entry) {
             debug!("Inserting or updating page: {:?} … ", entry);
-            let page = Self::path_to_page(entry.clone(), locale)?;
+            let page = self.path_to_page(entry.clone(), locale)?;
             // If the page already exists in the DAG, update it. Otherwise, insert it.
             let index = if pages.contains_key(&entry) {
                 debug!("Updating page: {:?} … ", entry);
@@ -231,7 +233,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
                 dag.remove_node(old_layout.1);
             }
             debug!("Inserting layout: {:?} … ", layout_path);
-            let layout_page = Self::path_to_page(layout_path.clone(), locale)?;
+            let layout_page = self.path_to_page(layout_path.clone(), locale)?;
             let layout_index = dag.add_child(index, EdgeType::Layout, layout_page);
             if let Some(layouts) = layouts.get_mut(&layout_path) {
                 layouts.insert(layout_index.1);
@@ -279,6 +281,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// The layout page's URL.
     fn get_layout_url(
+        &self,
         layout_node_index: &NodeIndex,
         dag: &StableDag<Page, EdgeType>,
     ) -> Option<String> {
@@ -296,7 +299,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             if *dag.edge_weight(parent.0).unwrap() != EdgeType::Layout {
                 continue;
             }
-            result = Self::get_layout_url(&parent.1, dag)?;
+            result = self.get_layout_url(&parent.1, dag)?;
         }
         if result.is_empty() {
             None
@@ -318,12 +321,17 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Returns
     ///
     /// The page's output path.
-    fn get_output_path(page: &Page, page_index: &NodeIndex, build: &Build) -> Option<String> {
+    fn get_output_path(
+        &self,
+        page: &Page,
+        page_index: &NodeIndex,
+        build: &Build,
+    ) -> Option<String> {
         // If a page has no URL, it may be a layout.
         // Layouts contain rendered content but must be written using their parent's URL.
 
         if page.url.is_empty() {
-            let layout_url = Self::get_layout_url(page_index, &build.dag);
+            let layout_url = self.get_layout_url(page_index, &build.dag);
             layout_url.map(|layout_url| format!("output/{}", layout_url))
         } else if !page.url.is_empty() {
             Some(format!("output/{}", page.url))
@@ -333,7 +341,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     }
 
     /// Generate stylesheets for syntax highlighting.
-    fn generate_syntax_stylesheets() -> miette::Result<()> {
+    fn generate_syntax_stylesheets(&self) -> miette::Result<()> {
         let css_path = PathBuf::from("output/css/");
         let dark_css_path = css_path.join("dark-code.css");
         let light_css_path = css_path.join("light-code.css");
@@ -344,16 +352,16 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         let css_dark =
             css_for_theme_with_class_style(dark_theme, syntect::html::ClassStyle::Spaced)
                 .into_diagnostic()?;
-        Self::write_file(dark_css_path, css_dark)?;
+        self.write_file(dark_css_path, css_dark)?;
 
         let light_theme = &ts.themes["base16-ocean.light"];
         let css_light =
             css_for_theme_with_class_style(light_theme, syntect::html::ClassStyle::Spaced)
                 .into_diagnostic()?;
-        Self::write_file(light_css_path, css_light)?;
+        self.write_file(light_css_path, css_light)?;
 
         let css = r#"@import url("light-code.css") (prefers-color-scheme: light);@import url("dark-code.css") (prefers-color-scheme: dark);"#;
-        Self::write_file(code_css_path, css)?;
+        self.write_file(code_css_path, css)?;
         Ok(())
     }
 
@@ -362,7 +370,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// # Arguments
     ///
     /// * `build` - A Vox build.
-    fn visualise_dag(build: &Build) -> miette::Result<()> {
+    fn visualise_dag(&self, build: &Build) -> miette::Result<()> {
         let dag_graph = build.dag.graph();
         let dag_graphviz = Dot::with_attr_getters(
             dag_graph,
@@ -402,7 +410,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             }
             vg.do_it(false, false, false, &mut svg);
             let content = svg.finalize();
-            Self::write_file("output/dag.svg", content)?;
+            self.write_file("output/dag.svg", content)?;
         } else {
             warn!("Unable to visualise the DAG.")
         }
@@ -429,6 +437,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// A list of rendered pages and the DAG of the finished Vox build.
     fn generate_site(
+        &self,
         template_parser: liquid::Parser,
         contexts: liquid::Object,
         locale: Locale,
@@ -445,14 +454,14 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         };
         let updated_pages = build.render_all()?;
         if visualise_dag {
-            Self::visualise_dag(&build)?;
+            self.visualise_dag(&build)?;
         }
         info!("{} pages were rendered … ", updated_pages.len());
         for updated_page_index in updated_pages.iter() {
             let updated_page = &build.dag.graph()[*updated_page_index];
             // If a page has no URL, it may be a layout.
             // Layouts contain rendered content but must be written using their parent's URL.
-            let output_path = Self::get_output_path(updated_page, updated_page_index, &build);
+            let output_path = self.get_output_path(updated_page, updated_page_index, &build);
             match output_path {
                 None => {
                     warn!("Page has no URL: {:#?} … ", updated_page.to_path_string());
@@ -464,12 +473,12 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
                         updated_page.to_path_string(),
                         output_path
                     );
-                    Self::write_file(output_path, updated_page.rendered.clone())?;
+                    self.write_file(output_path, updated_page.rendered.clone())?;
                 }
             }
         }
         if generate_syntax_css {
-            Self::generate_syntax_stylesheets()?;
+            self.generate_syntax_stylesheets()?;
         }
         timer.stop();
         info!(
@@ -503,6 +512,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// The DAG of the new finished Vox build, a new mapping of paths to DAG indices, and a new mapping of paths to a set of DAG indices.
     #[allow(clippy::type_complexity)]
     fn incremental_regeneration(
+        &self,
         global_or_snippets_changed: bool,
         parser: liquid::Parser,
         visualise_dag: bool,
@@ -515,8 +525,8 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         AHashMap<PathBuf, NodeIndex<u32>>,
         AHashMap<PathBuf, HashSet<NodeIndex>>,
     )> {
-        let (mut new_dag, new_pages, new_layouts) = Self::generate_dag()?;
-        let (added_or_modified, removed, removed_output_paths) = Self::get_dag_difference(
+        let (mut new_dag, new_pages, new_layouts) = self.generate_dag()?;
+        let (added_or_modified, removed, removed_output_paths) = self.get_dag_difference(
             &old_dag,
             &old_pages,
             &old_layouts,
@@ -524,7 +534,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             &new_pages,
             &new_layouts,
         )?;
-        let pages_to_render = Self::pages_to_render(
+        let pages_to_render = self.pages_to_render(
             &old_dag,
             &new_dag,
             &new_pages,
@@ -533,7 +543,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             added_or_modified,
             removed,
         )?;
-        Self::merge_dags(
+        self.merge_dags(
             &pages_to_render,
             old_dag,
             &mut new_dag,
@@ -541,7 +551,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             &new_pages,
         )?;
         Ok((
-            Self::output_regenerated(
+            self.output_regenerated(
                 visualise_dag,
                 generate_syntax_css,
                 parser,
@@ -576,6 +586,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// The DAG of the new finished Vox build.
     fn output_regenerated(
+        &self,
         visualise_dag: bool,
         generate_syntax_css: bool,
         parser: liquid::Parser,
@@ -583,7 +594,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         new_dag: StableDag<Page, crate::builds::EdgeType>,
         pages_to_render: AHashSet<NodeIndex>,
     ) -> miette::Result<StableDag<Page, crate::builds::EdgeType>> {
-        let global = Self::get_global_context()?;
+        let global = self.get_global_context()?;
         info!("Rebuilding … ");
         let mut timer = Stopwatch::start_new();
         let mut build = Build {
@@ -593,13 +604,13 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             dag: new_dag,
         };
         if visualise_dag {
-            Self::visualise_dag(&build)?;
+            self.visualise_dag(&build)?;
         }
 
         // Delete the output of removed pages.
         for removed_output_path in removed_output_paths {
             debug!("Removing {:?} … ", removed_output_path);
-            Self::remove_file(removed_output_path)?;
+            self.remove_file(removed_output_path)?;
         }
 
         let mut rendered_pages = Vec::new();
@@ -613,7 +624,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
 
         for updated_page_index in rendered_pages.iter() {
             let updated_page = &build.dag.graph()[*updated_page_index];
-            let output_path = Self::get_output_path(updated_page, updated_page_index, &build);
+            let output_path = self.get_output_path(updated_page, updated_page_index, &build);
             match output_path {
                 None => {
                     warn!("Page has no URL: {:#?} … ", updated_page.to_path_string());
@@ -625,12 +636,12 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
                         updated_page.to_path_string(),
                         output_path
                     );
-                    Self::write_file(output_path, updated_page.rendered.clone())?;
+                    self.write_file(output_path, updated_page.rendered.clone())?;
                 }
             }
         }
         if generate_syntax_css {
-            Self::generate_syntax_stylesheets()?;
+            self.generate_syntax_stylesheets()?;
         }
         timer.stop();
         info!(
@@ -658,6 +669,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// * `new_pages` - New mapping of paths to DAG indices.
     fn merge_dags(
+        &self,
         pages_to_render: &AHashSet<NodeIndex>,
         old_dag: StableDag<Page, crate::builds::EdgeType>,
         new_dag: &mut StableDag<Page, crate::builds::EdgeType>,
@@ -707,6 +719,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// A set of pages needing to be rendered.
     fn pages_to_render(
+        &self,
         old_dag: &StableDag<Page, crate::builds::EdgeType>,
         new_dag: &StableDag<Page, crate::builds::EdgeType>,
         new_pages: &AHashMap<PathBuf, NodeIndex>,
@@ -784,6 +797,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// A set of pages that were added or modified, a set of pages that were removed, and a set of paths pointing to removed output files.
     fn get_dag_difference(
+        &self,
         old_dag: &StableDag<Page, crate::builds::EdgeType>,
         old_pages: &AHashMap<PathBuf, NodeIndex>,
         old_layouts: &AHashMap<PathBuf, HashSet<NodeIndex>>,
@@ -881,7 +895,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
                 removed.insert(old_pages[*page_path]);
                 if let Some(old_page) = old_dag_pages.get(page_path) {
                     let output_path = if old_page.url.is_empty() {
-                        let layout_url = Self::get_layout_url(&old_pages[*page_path], old_dag);
+                        let layout_url = self.get_layout_url(&old_pages[*page_path], old_dag);
                         layout_url.map(|layout_url| format!("output/{}", layout_url))
                     } else if !old_page.url.is_empty() {
                         Some(format!("output/{}", old_page.url))
@@ -911,12 +925,14 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     ///
     /// The new DAG, a mapping of paths to DAG indices, and a mapping of paths to a set of DAG indices.
     #[allow(clippy::type_complexity)]
-    fn generate_dag() -> miette::Result<(
+    fn generate_dag(
+        &self,
+    ) -> miette::Result<(
         StableDag<Page, crate::builds::EdgeType>,
         AHashMap<PathBuf, NodeIndex>,
         AHashMap<PathBuf, HashSet<NodeIndex>>,
     )> {
-        let global = Self::get_global_context()?;
+        let global = self.get_global_context()?;
         let mut dag = StableDag::new();
         let mut pages: AHashMap<PathBuf, NodeIndex> = AHashMap::new();
         let mut layouts: AHashMap<PathBuf, HashSet<NodeIndex>> = AHashMap::new();
@@ -926,11 +942,12 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         // DAG construction.
         debug!("Constructing DAG … ");
         // In the event that a layout has collection parents, we do not want it duplicated, so we avoid inserting it at first.
-        for entry in Self::list_vox_files()?
+        for entry in self
+            .list_vox_files()?
             .into_iter()
             .filter(|x| !Page::is_layout_path(x))
         {
-            Self::insert_or_update_page(
+            self.insert_or_update_page(
                 entry,
                 None,
                 &mut dag,
@@ -944,7 +961,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         // We update the layouts with their parents and children once all other pages have been inserted.
         for (layout_path, layout_indices) in layouts.clone() {
             for layout_index in layout_indices {
-                Self::insert_or_update_page(
+                self.insert_or_update_page(
                     layout_path.clone(),
                     Some(layout_index),
                     &mut dag,
@@ -979,7 +996,7 @@ pub struct PartialSource<T>(T, Vec<String>);
 impl<T: VoxProvider + std::fmt::Debug + std::marker::Sync> PartialSource<&'_ T> {
     /// Refresh the internal list of snippets.
     pub fn update_list(&mut self) {
-        self.1 = match T::list_snippets() {
+        self.1 = match self.0.list_snippets() {
             Ok(snippets) => snippets
                 .iter()
                 .filter_map(|x| x.file_name())
@@ -1000,7 +1017,8 @@ impl<T: VoxProvider + core::fmt::Debug> liquid::partials::PartialSource for Part
         self.1.iter().map(|s| s.as_str()).collect()
     }
     fn try_get<'a>(&'a self, name: &str) -> Option<std::borrow::Cow<'a, str>> {
-        T::read_to_string(format!("snippets/{}", name))
+        self.0
+            .read_to_string(format!("snippets/{}", name))
             .ok()
             .map(|x| x.into())
     }

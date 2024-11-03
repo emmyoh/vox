@@ -227,12 +227,12 @@ async fn main() -> miette::Result<()> {
 
 fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette::Result<()> {
     let parser = FS_PROVIDER.create_liquid_parser()?;
-    let global = FsProvider::get_global_context()?;
-    let (mut dag, mut pages, mut layouts) = FsProvider::generate_dag()?;
+    let global = FS_PROVIDER.get_global_context()?;
+    let (mut dag, mut pages, mut layouts) = FS_PROVIDER.generate_dag()?;
 
     // Write the initial site to the output directory.
     info!("Performing initial build … ");
-    let (_updated_pages, updated_dag) = FsProvider::generate_site(
+    let (_updated_pages, updated_dag) = FS_PROVIDER.generate_site(
         parser.clone(),
         global.0.clone(),
         global.1,
@@ -293,7 +293,7 @@ fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette:
                     .collect::<Vec<_>>()
             );
 
-            (dag, pages, layouts) = FsProvider::incremental_regeneration(
+            (dag, pages, layouts) = FS_PROVIDER.incremental_regeneration(
                 global_or_snippets_changed,
                 parser.clone(),
                 visualise_dag,
