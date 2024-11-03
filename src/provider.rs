@@ -22,13 +22,13 @@ use syntect::highlighting::ThemeSet;
 use syntect::html::css_for_theme_with_class_style;
 use ticky::Stopwatch;
 use toml::Table;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// The Vox crate version number.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// An implementation of the Vox build process.
-pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
+pub trait VoxProvider {
     /// Read a file's contents as a string.
     ///
     /// # Arguments
@@ -74,24 +74,12 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
     /// A list of paths to Vox snippets.
     fn list_snippets(&self) -> miette::Result<Vec<PathBuf>>;
 
-    /// Obtain a source of Liquid partials.
-    ///
-    /// # Returns
-    ///
-    /// A source of Liquid partials, initially with an empty list of snippets.
-    fn partial_source(&self) -> PartialSource<&Self> {
-        PartialSource(self, Vec::new())
-    }
-
     /// Create a Liquid parser.
     ///
     /// # Returns
     ///
     /// A Liquid parser.
-    fn create_liquid_parser(&'static self) -> miette::Result<liquid::Parser> {
-        let mut partials = self.partial_source();
-        partials.update_list();
-        let partial_compiler = liquid::partials::EagerCompiler::new(partials);
+    fn create_liquid_parser(&self) -> miette::Result<liquid::Parser> {
         liquid::ParserBuilder::with_stdlib()
             .tag(liquid_lib::jekyll::IncludeTag)
             .filter(liquid_lib::jekyll::ArrayToSentenceString)
@@ -105,7 +93,7 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
             .filter(liquid_lib::extra::DateInTz)
             .block(MathBlock)
             .block(MarkdownBlock)
-            .partials(partial_compiler)
+            .partials(liquid::partials::EagerCompiler::new(self.partial_source()))
             .build()
             .into_diagnostic()
     }
@@ -986,40 +974,29 @@ pub trait VoxProvider: core::fmt::Debug + core::marker::Sized + Sync {
         }
         Ok((dag, pages, layouts))
     }
-}
 
-#[derive(Debug, Clone)]
-/// A source of Liquid partials.
-///
-/// Composed of a Vox provider and a list of snippets.
-pub struct PartialSource<T>(T, Vec<String>);
-impl<T: VoxProvider + std::fmt::Debug + std::marker::Sync> PartialSource<&'_ T> {
-    /// Refresh the internal list of snippets.
-    pub fn update_list(&mut self) {
-        self.1 = match self.0.list_snippets() {
-            Ok(snippets) => snippets
-                .iter()
-                .filter_map(|x| x.file_name())
-                .map(|x| x.to_string_lossy().to_string())
-                .collect(),
-            Err(e) => {
-                error!("{}", e);
-                Vec::new()
-            }
+    /// Obtain a source of Liquid partials.
+    ///
+    /// # Returns
+    ///
+    /// A source of Liquid partials.
+    fn partial_source(&self) -> liquid::partials::InMemorySource {
+        let snippet_paths = self.list_snippets().unwrap_or_default();
+        let snippets: Vec<_> = snippet_paths
+            .clone()
+            .into_iter()
+            .filter_map(|x| self.read_to_string(x).ok())
+            .collect();
+        let snippet_names: Vec<_> = snippet_paths
+            .clone()
+            .into_iter()
+            .filter_map(|x| x.file_name().map(|y| y.to_os_string()))
+            .map(|x| x.to_string_lossy().to_string())
+            .collect();
+        let mut partial_source = liquid::partials::InMemorySource::new();
+        for (name, snippet) in snippet_names.iter().zip(snippets.iter()) {
+            partial_source.add(name, snippet);
         }
-    }
-}
-impl<T: VoxProvider + core::fmt::Debug> liquid::partials::PartialSource for PartialSource<&'_ T> {
-    fn contains(&self, name: &str) -> bool {
-        self.1.contains(&name.to_owned())
-    }
-    fn names(&self) -> Vec<&str> {
-        self.1.iter().map(|s| s.as_str()).collect()
-    }
-    fn try_get<'a>(&'a self, name: &str) -> Option<std::borrow::Cow<'a, str>> {
-        self.0
-            .read_to_string(format!("snippets/{}", name))
-            .ok()
-            .map(|x| x.into())
+        partial_source
     }
 }
