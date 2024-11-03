@@ -17,7 +17,7 @@ use vox::provider::{VoxProvider, VERSION};
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-static FS_PROVIDER: LazyLock<FsProvider> = LazyLock::new(|| FsProvider {});
+static FS_PROVIDER: LazyLock<FsProvider> = LazyLock::new(|| FsProvider::new());
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]

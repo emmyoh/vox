@@ -34,3 +34,9 @@ impl VoxProvider for FsProvider {
             .collect())
     }
 }
+impl FsProvider {
+    /// Create a new Vox provider that reads & writes from the file system.
+    pub fn new() -> Self {
+        Self {}
+    }
+}

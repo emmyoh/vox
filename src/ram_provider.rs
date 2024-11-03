@@ -60,3 +60,11 @@ impl VoxProvider for RamProvider {
             .collect())
     }
 }
+impl RamProvider {
+    /// Create a new Vox provider that reads & writes from memory.
+    pub fn new(initial_files: Option<HashMap<std::path::PathBuf, String>>) -> Self {
+        Self {
+            files: Arc::new(Mutex::new(initial_files.unwrap_or_default())),
+        }
+    }
+}
