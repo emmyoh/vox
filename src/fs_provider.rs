@@ -1,7 +1,7 @@
 use crate::provider::VoxProvider;
 use miette::IntoDiagnostic;
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// A provider of the Vox build system that reads & writes from the file system.
 pub struct FsProvider;
 impl VoxProvider for FsProvider {

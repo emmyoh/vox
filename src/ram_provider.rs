@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-#[derive(Debug)]
+#[derive(Clone, Debug, Default)]
 /// A provider of the Vox build system that reads & writes from memory.
 pub struct RamProvider {
     files: Arc<Mutex<HashMap<std::path::PathBuf, String>>>,
