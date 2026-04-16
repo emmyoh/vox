@@ -40,7 +40,7 @@ impl ParseBlock for MathBlock {
         mut arguments: TagTokenIter<'_>,
         mut tokens: TagBlock<'_, '_>,
         _options: &Language,
-    ) -> Result<Box<(dyn Renderable + 'static)>, liquid::Error> {
+    ) -> Result<Box<dyn Renderable + 'static>, liquid::Error> {
         arguments.expect_nothing()?;
 
         let raw_content = tokens.escape_liquid(false)?.to_string();

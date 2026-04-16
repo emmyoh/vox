@@ -81,8 +81,8 @@ impl Date {
             Some(time) => NaiveTime::from_hms_nano_opt(
                 time.hour.into(),
                 time.minute.into(),
-                time.second.into(),
-                time.nanosecond,
+                time.second.map(|x| x.into()).unwrap_or_default(),
+                time.nanosecond.unwrap_or_default(),
             )
             .unwrap(),
             None => NaiveTime::from_hms_nano_opt(0, 0, 0, 0).unwrap(),
