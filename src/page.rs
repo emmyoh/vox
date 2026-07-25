@@ -257,30 +257,26 @@ impl Page {
     /// # Returns
     ///
     /// A tuple where the first element is the frontmatter, and where the second element is the body.
-    pub fn get_frontmatter_and_body(
-        contents: String,
-        path: PathBuf,
-    ) -> miette::Result<(String, String)> {
-        let contents_clone = contents.clone();
-        let mut lines = contents_clone.lines();
-        let start_of_frontmatter = lines
-            .position(|x| x == "---")
+    pub fn get_frontmatter_and_body<'a>(
+        contents: &'a str,
+        path: &'a PathBuf,
+    ) -> miette::Result<(&'a str, &'a str)> {
+        let start_of_frontmatter = contents
+            .find("---\n")
             .ok_or(FrontmatterNotFound {
-                src: NamedSource::new(path.to_string_lossy(), contents.clone()),
+                src: NamedSource::new(path.to_string_lossy(), contents.to_string()),
             })
             .into_diagnostic()?;
-        let end_of_frontmatter = lines
-            .position(|x| x == "---")
-            .ok_or(FrontmatterNotFound {
-                src: NamedSource::new(path.to_string_lossy(), contents.clone()),
-            })
-            .into_diagnostic()?;
-        let body = lines.collect::<Vec<&str>>().join("\n");
-        let frontmatter = contents
-            .lines()
-            .map(|x| x.to_string())
-            .collect::<Vec<String>>()[start_of_frontmatter + 1..end_of_frontmatter + 1]
-            .join("\n");
+        let end_of_frontmatter = start_of_frontmatter
+            + 4
+            + (&contents[start_of_frontmatter + 4..])
+                .find("---\n")
+                .ok_or(FrontmatterNotFound {
+                    src: NamedSource::new(path.to_string_lossy(), contents.to_string()),
+                })
+                .into_diagnostic()?;
+        let frontmatter = &contents[start_of_frontmatter + 4..end_of_frontmatter];
+        let body = &contents[end_of_frontmatter + 4..];
         Ok((frontmatter, body))
     }
 
@@ -299,14 +295,14 @@ impl Page {
     /// An instance of a page.
     pub fn new(contents: String, path: impl Into<PathBuf>, locale: Locale) -> miette::Result<Page> {
         let path = path.into().clean();
-        let (frontmatter, body) = Self::get_frontmatter_and_body(contents.clone(), path.clone())?;
+        let (frontmatter, body) = Self::get_frontmatter_and_body(&contents, &path)?;
         let frontmatter_data = frontmatter.parse::<Table>().into_diagnostic()?;
         let frontmatter_data_clone = frontmatter_data.clone();
         let date = if let Some(date) = frontmatter_data.get("date") {
             let date_value = date
                 .as_datetime()
                 .ok_or(DateNotValid {
-                    src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
+                    src: NamedSource::new(path.to_string_lossy(), frontmatter.to_string()),
                 })
                 .into_diagnostic()?;
             Some(Date::value_to_date(*date_value, locale))
@@ -324,14 +320,17 @@ impl Page {
                 depends
                     .as_array()
                     .ok_or(InvalidDependsProperty {
-                        src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
+                        src: NamedSource::new(path.to_string_lossy(), frontmatter.to_string()),
                     })
                     .into_diagnostic()?
                     .iter()
                     .map(|x| {
                         x.as_str()
                             .ok_or(InvalidDependsProperty {
-                                src: NamedSource::new(path.to_string_lossy(), frontmatter.clone()),
+                                src: NamedSource::new(
+                                    path.to_string_lossy(),
+                                    frontmatter.to_string(),
+                                ),
                             })
                             .unwrap()
                             .to_string()
@@ -342,7 +341,7 @@ impl Page {
         };
         Ok(Page {
             data: frontmatter_data,
-            content: body,
+            content: body.to_string(),
             permalink: permalink.unwrap_or_default(),
             date,
             layout,
