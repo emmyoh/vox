@@ -49,13 +49,13 @@ impl Build {
     /// A list of indices of all descendants of the page.
     pub fn get_descendants(
         dag: &StableDag<Page, EdgeType>,
-        root_index: NodeIndex,
+        root_index: &NodeIndex,
     ) -> Vec<NodeIndex> {
         let mut descendants = Vec::new();
-        let children = dag.children(root_index).iter(dag).collect::<Vec<_>>();
+        let children = dag.children(*root_index).iter(dag).collect::<Vec<_>>();
         for child in children {
             descendants.push(child.1);
-            let child_descendants = Build::get_descendants(dag, child.1);
+            let child_descendants = Build::get_descendants(dag, &child.1);
             descendants.extend(child_descendants);
         }
         descendants
@@ -136,13 +136,13 @@ impl Build {
                 layout_ancestor_contexts.push(ancestor_object);
             } else {
                 layout_ancestor_contexts.push(ancestor_object.clone());
-                root_contexts.insert("page".into(), ancestor_object.clone());
+                root_contexts.insert("page".into(), ancestor_object);
                 break;
             }
         }
         root_contexts.insert(
             "layouts".into(),
-            liquid_core::Value::Array(layout_ancestor_contexts.clone()),
+            liquid_core::Value::Array(layout_ancestor_contexts),
         );
         Ok(())
     }

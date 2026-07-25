@@ -164,7 +164,7 @@ impl Page {
     ///
     /// Whether or not the page is a layout.
     pub fn is_layout(&self) -> bool {
-        Page::is_layout_path(self.to_path_string())
+        Page::is_layout_path(&self.to_path_string())
     }
 
     /// Get the names of the collections a page belongs to.
@@ -293,11 +293,10 @@ impl Page {
     /// # Returns
     ///
     /// An instance of a page.
-    pub fn new(contents: String, path: impl Into<PathBuf>, locale: Locale) -> miette::Result<Page> {
+    pub fn new(contents: &str, path: impl Into<PathBuf>, locale: &Locale) -> miette::Result<Page> {
         let path = path.into().clean();
         let (frontmatter, body) = Self::get_frontmatter_and_body(&contents, &path)?;
         let frontmatter_data = frontmatter.parse::<Table>().into_diagnostic()?;
-        let frontmatter_data_clone = frontmatter_data.clone();
         let date = if let Some(date) = frontmatter_data.get("date") {
             let date_value = date
                 .as_datetime()
@@ -305,17 +304,17 @@ impl Page {
                     src: NamedSource::new(path.to_string_lossy(), frontmatter.to_string()),
                 })
                 .into_diagnostic()?;
-            Some(Date::value_to_date(*date_value, locale))
+            Some(Date::value_to_date(date_value, locale))
         } else {
             None
         };
-        let layout = frontmatter_data_clone
+        let layout = frontmatter_data
             .get("layout")
             .map(|p| p.as_str().unwrap().to_string());
-        let permalink = frontmatter_data_clone
+        let permalink = frontmatter_data
             .get("permalink")
             .map(|p| p.as_str().unwrap().to_string());
-        let depends = match frontmatter_data_clone.get("depends") {
+        let depends = match frontmatter_data.get("depends") {
             Some(depends) => Some(
                 depends
                     .as_array()
@@ -356,8 +355,8 @@ impl Page {
                 .unwrap_or(&OsString::new())
                 .to_string_lossy()
                 .to_string(),
-            collections: Page::get_collections_from_path(path.clone())?,
-            is_layout: Page::is_layout_path(path),
+            collections: Page::get_collections_from_path(&path)?,
+            is_layout: Page::is_layout_path(&path),
             url: String::new(),
             rendered: String::new(),
         })

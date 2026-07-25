@@ -233,12 +233,12 @@ fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette:
     // Write the initial site to the output directory.
     info!("Performing initial build … ");
     let (_updated_pages, updated_dag) = FS_PROVIDER.generate_site(
-        parser.clone(),
-        global.0.clone(),
-        global.1,
-        dag,
-        visualise_dag,
-        generate_syntax_css,
+        &parser,
+        &global.0,
+        &global.1,
+        &dag,
+        &visualise_dag,
+        &generate_syntax_css,
     )?;
     dag = updated_dag;
 
@@ -267,11 +267,11 @@ fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette:
             }
             let global_or_snippets_changed = events.iter().any(|event| {
                 event.paths.iter().any(|path| {
-                    path.strip_prefix(current_path.clone())
+                    path.strip_prefix(&current_path)
                         .unwrap_or(path)
                         .starts_with("global.toml")
                         || path
-                            .strip_prefix(current_path.clone())
+                            .strip_prefix(&current_path)
                             .unwrap_or(path)
                             .starts_with("snippets/")
                 })
@@ -280,12 +280,10 @@ fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette:
                 "Changes detected: {:#?} … ",
                 events
                     .into_iter()
-                    .map(|event| event
-                        .paths
-                        .clone()
+                    .map(|event| (&event.paths)
                         .into_iter()
                         .map(|path| {
-                            path.strip_prefix(current_path.clone())
+                            path.strip_prefix(&current_path)
                                 .unwrap_or(&path)
                                 .to_path_buf()
                         })
@@ -294,13 +292,13 @@ fn build(watch: bool, visualise_dag: bool, generate_syntax_css: bool) -> miette:
             );
 
             (dag, pages, layouts) = FS_PROVIDER.incremental_regeneration(
-                global_or_snippets_changed,
-                parser.clone(),
-                visualise_dag,
-                generate_syntax_css,
-                dag,
-                pages,
-                layouts,
+                &global_or_snippets_changed,
+                &parser,
+                &visualise_dag,
+                &generate_syntax_css,
+                &dag,
+                &pages,
+                &layouts,
             )?;
         }
     }

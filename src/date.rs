@@ -69,7 +69,7 @@ impl Date {
     /// * `value` - The `toml::Value` to convert
     ///
     /// * `locale` - The locale used to represent dates and times
-    pub fn value_to_date(value: toml::value::Datetime, locale: chrono::Locale) -> Date {
+    pub fn value_to_date(value: &toml::value::Datetime, locale: &chrono::Locale) -> Date {
         let date = match value.date {
             Some(date) => {
                 NaiveDate::from_ymd_opt(date.year.into(), date.month.into(), date.day.into())
@@ -100,7 +100,7 @@ impl Date {
             }
             None => naive_datetime.and_utc().into(),
         };
-        Date::chrono_to_date(datetime.into(), locale)
+        Date::chrono_to_date(&datetime.into(), locale)
     }
 
     /// Convert a `chrono::DateTime` into a `Date`
@@ -110,25 +110,25 @@ impl Date {
     /// * `datetime` - A `chrono::DateTime<chrono::Utc>`
     ///
     /// * `locale` - The locale used to represent dates and times
-    pub fn chrono_to_date(datetime: chrono::DateTime<Utc>, locale: chrono::Locale) -> Date {
+    pub fn chrono_to_date(datetime: &chrono::DateTime<Utc>, locale: &chrono::Locale) -> Date {
         Date {
-            year: format!("{}", datetime.format_localized("%Y", locale)),
-            short_year: format!("{}", datetime.format_localized("%y", locale)),
-            month: format!("{}", datetime.format_localized("%m", locale)),
-            i_month: format!("{}", datetime.format_localized("%-m", locale)),
-            short_month: format!("{}", datetime.format_localized("%b", locale)),
-            long_month: format!("{}", datetime.format_localized("%B", locale)),
-            day: format!("{}", datetime.format_localized("%d", locale)),
-            i_day: format!("{}", datetime.format_localized("%-d", locale)),
-            y_day: format!("{}", datetime.format_localized("%j", locale)),
-            w_year: format!("{}", datetime.format_localized("%G", locale)),
-            week: format!("{}", datetime.format_localized("%U", locale)),
-            w_day: format!("{}", datetime.format_localized("%u", locale)),
-            short_day: format!("{}", datetime.format_localized("%a", locale)),
-            long_day: format!("{}", datetime.format_localized("%A", locale)),
-            hour: format!("{}", datetime.format_localized("%H", locale)),
-            minute: format!("{}", datetime.format_localized("%M", locale)),
-            second: format!("{}", datetime.format_localized("%S", locale)),
+            year: format!("{}", datetime.format_localized("%Y", *locale)),
+            short_year: format!("{}", datetime.format_localized("%y", *locale)),
+            month: format!("{}", datetime.format_localized("%m", *locale)),
+            i_month: format!("{}", datetime.format_localized("%-m", *locale)),
+            short_month: format!("{}", datetime.format_localized("%b", *locale)),
+            long_month: format!("{}", datetime.format_localized("%B", *locale)),
+            day: format!("{}", datetime.format_localized("%d", *locale)),
+            i_day: format!("{}", datetime.format_localized("%-d", *locale)),
+            y_day: format!("{}", datetime.format_localized("%j", *locale)),
+            w_year: format!("{}", datetime.format_localized("%G", *locale)),
+            week: format!("{}", datetime.format_localized("%U", *locale)),
+            w_day: format!("{}", datetime.format_localized("%u", *locale)),
+            short_day: format!("{}", datetime.format_localized("%a", *locale)),
+            long_day: format!("{}", datetime.format_localized("%A", *locale)),
+            hour: format!("{}", datetime.format_localized("%H", *locale)),
+            minute: format!("{}", datetime.format_localized("%M", *locale)),
+            second: format!("{}", datetime.format_localized("%S", *locale)),
             rfc_3339: datetime.to_rfc3339(),
             rfc_2822: datetime.to_rfc2822(),
         }
@@ -146,7 +146,7 @@ pub fn default_locale() -> chrono::Locale {
 }
 
 /// Gets a `chrono::Locale` from a string
-pub fn locale_string_to_locale(locale: String) -> chrono::Locale {
+pub fn locale_string_to_locale(locale: &str) -> chrono::Locale {
     debug!("Locale: {}", locale);
-    chrono::Locale::try_from(locale.as_str()).unwrap_or(default_locale())
+    chrono::Locale::try_from(locale).unwrap_or(default_locale())
 }

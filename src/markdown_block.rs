@@ -19,7 +19,7 @@ use std::io::Write;
 /// # Arguments
 ///
 /// * `text_to_render` - The Markdown text to render into HTML
-pub fn render_markdown(text_to_render: String) -> String {
+pub fn render_markdown(text_to_render: &str) -> String {
     let mut options = comrak::Options::default();
     options.extension.alerts = true;
     options.extension.autolink = false;
@@ -142,7 +142,7 @@ impl Renderable for Markdown {
         self.content.render_to(&mut buf, runtime)?;
         let bytes = buf.into_inner().unwrap_or_default();
         let liquid_rendered = String::from_utf8(bytes).unwrap_or_default();
-        let rendered = render_markdown(liquid_rendered);
+        let rendered = render_markdown(&liquid_rendered);
         write!(writer, "{}", rendered).replace("Failed to render")?;
         Ok(())
     }

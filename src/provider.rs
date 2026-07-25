@@ -109,8 +109,8 @@ pub trait VoxProvider {
     /// # Returns
     ///
     /// A Vox page.
-    fn path_to_page(&self, path: PathBuf, locale: Locale) -> miette::Result<Page> {
-        Page::new(self.read_to_string(path.clone())?, path, locale)
+    fn path_to_page(&self, path: &PathBuf, locale: &Locale) -> miette::Result<Page> {
+        Page::new(&self.read_to_string(&path)?, path, locale)
     }
 
     /// Get the global Liquid context.
@@ -131,8 +131,8 @@ pub trait VoxProvider {
             .as_str()
             .unwrap_or(&date::default_locale_string())
             .to_string();
-        let locale = date::locale_string_to_locale(locale.clone());
-        let current_date = Date::chrono_to_date(Utc::now(), locale);
+        let locale = date::locale_string_to_locale(&locale);
+        let current_date = Date::chrono_to_date(&Utc::now(), &locale);
         Ok((
             object!({
                 "global": global_context,
@@ -168,19 +168,19 @@ pub trait VoxProvider {
     #[allow(clippy::too_many_arguments)]
     fn insert_or_update_page(
         &self,
-        entry: PathBuf,
-        layout_index: Option<NodeIndex>,
+        entry: &PathBuf,
+        layout_index: &Option<NodeIndex>,
         dag: &mut StableDag<Page, EdgeType>,
         pages: &mut AHashMap<PathBuf, NodeIndex>,
         layouts: &mut AHashMap<PathBuf, HashSet<NodeIndex>>,
         collection_dependents: &mut AHashMap<String, HashSet<NodeIndex>>,
         collection_members: &mut AHashMap<String, HashSet<NodeIndex>>,
-        locale: Locale,
+        locale: &Locale,
     ) -> miette::Result<()> {
         let entry = entry.clean();
         let (page, index) = if !Page::is_layout_path(&entry) {
             debug!("Inserting or updating page: {:?} … ", entry);
-            let page = self.path_to_page(entry.clone(), locale)?;
+            let page = self.path_to_page(&entry, &locale)?;
             // If the page already exists in the DAG, update it. Otherwise, insert it.
             let index = if pages.contains_key(&entry) {
                 debug!("Updating page: {:?} … ", entry);
@@ -203,9 +203,9 @@ pub trait VoxProvider {
         };
 
         // A page's parents are pages in the collections it depends on. Its layout is a child.
-        let layout = page.layout.clone();
-        let collections = page.collections.clone();
-        let depends = page.depends.clone();
+        let layout = page.layout;
+        let collections = page.collections;
+        let depends = page.depends;
         debug!("Layout used: {:?} … ", layout);
         debug!("Collections used: {:?} … ", depends);
         if let Some(layout) = layout {
@@ -221,14 +221,14 @@ pub trait VoxProvider {
                 dag.remove_node(old_layout.1);
             }
             debug!("Inserting layout: {:?} … ", layout_path);
-            let layout_page = self.path_to_page(layout_path.clone(), locale)?;
+            let layout_page = self.path_to_page(&layout_path, &locale)?;
             let layout_index = dag.add_child(index, EdgeType::Layout, layout_page);
             if let Some(layouts) = layouts.get_mut(&layout_path) {
                 layouts.insert(layout_index.1);
             } else {
                 let mut new_set = HashSet::new();
                 new_set.insert(layout_index.1);
-                layouts.insert(layout_path.clone(), new_set);
+                layouts.insert(layout_path, new_set);
             }
         }
         if let Some(collections) = collections {
@@ -238,7 +238,7 @@ pub trait VoxProvider {
                 } else {
                     let mut new_set = HashSet::new();
                     new_set.insert(index);
-                    collection_members.insert(collection.clone(), new_set);
+                    collection_members.insert(collection, new_set);
                 }
             }
         }
@@ -249,7 +249,7 @@ pub trait VoxProvider {
                 } else {
                     let mut new_set = HashSet::new();
                     new_set.insert(index);
-                    collection_dependents.insert(collection.clone(), new_set);
+                    collection_dependents.insert(collection, new_set);
                 }
             }
         }
@@ -273,9 +273,9 @@ pub trait VoxProvider {
         layout_node_index: &NodeIndex,
         dag: &StableDag<Page, EdgeType>,
     ) -> Option<String> {
-        let layout_node = dag.graph()[*layout_node_index].clone();
+        let layout_node = &dag.graph()[*layout_node_index];
         if !layout_node.url.is_empty() {
-            return Some(layout_node.url);
+            return Some(layout_node.url.to_string());
         }
 
         let parents = dag
@@ -381,11 +381,10 @@ pub trait VoxProvider {
                 let node = vg.element_mut(node_handle);
                 let old_shape = node.shape.clone();
                 if let ShapeKind::Circle(label) = old_shape {
-                    node.shape = ShapeKind::Box(label.clone());
-                    if Page::is_layout_path(label.clone()) {
+                    if Page::is_layout_path(&label) {
                         node.look.fill_color = Some(Color::fast("#FFDFBA"));
                     } else {
-                        match Page::get_collections_from_path(label)? {
+                        match Page::get_collections_from_path(&label)? {
                             Some(_) => {
                                 node.look.fill_color = Some(Color::fast("#DAFFBA"));
                             }
@@ -394,6 +393,7 @@ pub trait VoxProvider {
                             }
                         }
                     }
+                    node.shape = ShapeKind::Box(label);
                 }
             }
             vg.do_it(false, false, false, &mut svg);
@@ -426,22 +426,22 @@ pub trait VoxProvider {
     /// A list of rendered pages and the DAG of the finished Vox build.
     fn generate_site(
         &self,
-        template_parser: liquid::Parser,
-        contexts: liquid::Object,
-        locale: Locale,
-        dag: StableDag<Page, EdgeType>,
-        visualise_dag: bool,
-        generate_syntax_css: bool,
+        template_parser: &liquid::Parser,
+        contexts: &liquid::Object,
+        locale: &Locale,
+        dag: &StableDag<Page, EdgeType>,
+        visualise_dag: &bool,
+        generate_syntax_css: &bool,
     ) -> miette::Result<(Vec<NodeIndex>, StableDag<Page, EdgeType>)> {
         let mut timer = Stopwatch::start_new();
         let mut build = Build {
-            template_parser,
-            contexts,
-            locale,
-            dag,
+            template_parser: template_parser.clone(),
+            contexts: contexts.clone(),
+            locale: locale.clone(),
+            dag: dag.clone(),
         };
         let updated_pages = build.render_all()?;
-        if visualise_dag {
+        if *visualise_dag {
             self.visualise_dag(&build)?;
         }
         info!("{} pages were rendered … ", updated_pages.len());
@@ -461,11 +461,11 @@ pub trait VoxProvider {
                         updated_page.to_path_string(),
                         output_path
                     );
-                    self.write_file(output_path, updated_page.rendered.clone())?;
+                    self.write_file(output_path, &updated_page.rendered)?;
                 }
             }
         }
-        if generate_syntax_css {
+        if *generate_syntax_css {
             self.generate_syntax_stylesheets()?;
         }
         timer.stop();
@@ -501,13 +501,13 @@ pub trait VoxProvider {
     #[allow(clippy::type_complexity)]
     fn incremental_regeneration(
         &self,
-        global_or_snippets_changed: bool,
-        parser: liquid::Parser,
-        visualise_dag: bool,
-        generate_syntax_css: bool,
-        old_dag: StableDag<Page, crate::builds::EdgeType>,
-        old_pages: AHashMap<PathBuf, NodeIndex>,
-        old_layouts: AHashMap<PathBuf, HashSet<NodeIndex>>,
+        global_or_snippets_changed: &bool,
+        parser: &liquid::Parser,
+        visualise_dag: &bool,
+        generate_syntax_css: &bool,
+        old_dag: &StableDag<Page, crate::builds::EdgeType>,
+        old_pages: &AHashMap<PathBuf, NodeIndex>,
+        old_layouts: &AHashMap<PathBuf, HashSet<NodeIndex>>,
     ) -> miette::Result<(
         StableDag<Page, crate::builds::EdgeType>,
         AHashMap<PathBuf, NodeIndex<u32>>,
@@ -527,9 +527,9 @@ pub trait VoxProvider {
             &new_dag,
             &new_pages,
             &new_layouts,
-            global_or_snippets_changed,
-            added_or_modified,
-            removed,
+            &global_or_snippets_changed,
+            &added_or_modified,
+            &removed,
         )?;
         self.merge_dags(
             &pages_to_render,
@@ -543,9 +543,9 @@ pub trait VoxProvider {
                 visualise_dag,
                 generate_syntax_css,
                 parser,
-                removed_output_paths,
-                new_dag,
-                pages_to_render,
+                &removed_output_paths,
+                &new_dag,
+                &pages_to_render,
             )?,
             new_pages,
             new_layouts,
@@ -575,23 +575,23 @@ pub trait VoxProvider {
     /// The DAG of the new finished Vox build.
     fn output_regenerated(
         &self,
-        visualise_dag: bool,
-        generate_syntax_css: bool,
-        parser: liquid::Parser,
-        removed_output_paths: AHashSet<PathBuf>,
-        new_dag: StableDag<Page, crate::builds::EdgeType>,
-        pages_to_render: AHashSet<NodeIndex>,
+        visualise_dag: &bool,
+        generate_syntax_css: &bool,
+        parser: &liquid::Parser,
+        removed_output_paths: &AHashSet<PathBuf>,
+        new_dag: &StableDag<Page, crate::builds::EdgeType>,
+        pages_to_render: &AHashSet<NodeIndex>,
     ) -> miette::Result<StableDag<Page, crate::builds::EdgeType>> {
         let global = self.get_global_context()?;
         info!("Rebuilding … ");
         let mut timer = Stopwatch::start_new();
         let mut build = Build {
-            template_parser: parser,
+            template_parser: parser.clone(),
             contexts: global.0,
             locale: global.1,
-            dag: new_dag,
+            dag: new_dag.clone(),
         };
-        if visualise_dag {
+        if *visualise_dag {
             self.visualise_dag(&build)?;
         }
 
@@ -624,11 +624,11 @@ pub trait VoxProvider {
                         updated_page.to_path_string(),
                         output_path
                     );
-                    self.write_file(output_path, updated_page.rendered.clone())?;
+                    self.write_file(output_path, &updated_page.rendered)?;
                 }
             }
         }
-        if generate_syntax_css {
+        if *generate_syntax_css {
             self.generate_syntax_stylesheets()?;
         }
         timer.stop();
@@ -659,9 +659,9 @@ pub trait VoxProvider {
     fn merge_dags(
         &self,
         pages_to_render: &AHashSet<NodeIndex>,
-        old_dag: StableDag<Page, crate::builds::EdgeType>,
+        old_dag: &StableDag<Page, crate::builds::EdgeType>,
         new_dag: &mut StableDag<Page, crate::builds::EdgeType>,
-        old_pages: AHashMap<PathBuf, NodeIndex>,
+        old_pages: &AHashMap<PathBuf, NodeIndex>,
         new_pages: &AHashMap<PathBuf, NodeIndex>,
     ) -> miette::Result<()> {
         for (page_path, page_index) in new_pages {
@@ -712,23 +712,23 @@ pub trait VoxProvider {
         new_dag: &StableDag<Page, crate::builds::EdgeType>,
         new_pages: &AHashMap<PathBuf, NodeIndex>,
         new_layouts: &AHashMap<PathBuf, HashSet<NodeIndex>>,
-        global_or_snippets_changed: bool,
-        added_or_modified: AHashSet<NodeIndex>,
-        removed: AHashSet<NodeIndex>,
+        global_or_snippets_changed: &bool,
+        added_or_modified: &AHashSet<NodeIndex>,
+        removed: &AHashSet<NodeIndex>,
     ) -> miette::Result<AHashSet<NodeIndex>> {
         let mut pages_to_render = added_or_modified.clone();
         // If the global context or snippets have changed, all pages need to be re-rendered.
-        if global_or_snippets_changed {
+        if *global_or_snippets_changed {
             pages_to_render.extend(new_pages.values());
             pages_to_render.extend(new_layouts.values().flatten());
         }
-        for page_index in added_or_modified.clone() {
+        for page_index in added_or_modified.iter() {
             let descendants = Build::get_descendants(new_dag, page_index);
             for descendant in descendants {
                 pages_to_render.insert(descendant);
             }
         }
-        for page_index in removed.clone() {
+        for page_index in removed.iter() {
             let descendants = Build::get_descendants(old_dag, page_index);
             for descendant_page_index in descendants
                 .iter()
@@ -742,9 +742,9 @@ pub trait VoxProvider {
             }
         }
         // Only the root pages need to be passed to the rendering code, as it will recursively render their descendants.
-        for page_index in removed.clone() {
+        for page_index in removed.iter() {
             let children = old_dag
-                .children(page_index)
+                .children(*page_index)
                 .iter(old_dag)
                 .collect::<Vec<_>>();
             for child_page_index in children
@@ -803,7 +803,7 @@ pub trait VoxProvider {
         for (page_path, page) in new_pages.iter().filter_map(|(page_path, page_index)| {
             new_dag.node_weight(*page_index).map(|x| (page_path, x))
         }) {
-            new_dag_pages.insert(page_path.clone(), page);
+            new_dag_pages.insert(page_path, page);
         }
         let mut added_or_modified = AHashSet::new();
         let mut removed = AHashSet::new();
@@ -813,12 +813,12 @@ pub trait VoxProvider {
                 // If the page has been modified, its index is noted.
                 Some(old_page) => {
                     if !new_page.is_equivalent(old_page) {
-                        added_or_modified.insert(new_pages[page_path]);
+                        added_or_modified.insert(new_pages[*page_path]);
                     }
                 }
                 // If the page is new, its index is noted.
                 None => {
-                    added_or_modified.insert(new_pages[page_path]);
+                    added_or_modified.insert(new_pages[*page_path]);
                 }
             }
         }
@@ -936,28 +936,28 @@ pub trait VoxProvider {
             .filter(|x| !Page::is_layout_path(x))
         {
             self.insert_or_update_page(
-                entry,
-                None,
+                &entry,
+                &None,
                 &mut dag,
                 &mut pages,
                 &mut layouts,
                 &mut collection_dependents,
                 &mut collection_members,
-                global.1,
+                &global.1,
             )?;
         }
         // We update the layouts with their parents and children once all other pages have been inserted.
         for (layout_path, layout_indices) in layouts.clone() {
             for layout_index in layout_indices {
                 self.insert_or_update_page(
-                    layout_path.clone(),
-                    Some(layout_index),
+                    &layout_path,
+                    &Some(layout_index),
                     &mut dag,
                     &mut pages,
                     &mut layouts,
                     &mut collection_dependents,
                     &mut collection_members,
-                    global.1,
+                    &global.1,
                 )?;
             }
         }
